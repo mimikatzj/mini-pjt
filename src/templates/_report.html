@@ -1,0 +1,53 @@
+{#- 기사 1건의 요약·점검·제안 블록. 웹 페이지(2-12)와 메일(M4)이 함께 쓴다.
+    인라인 스타일만 쓴다 (메일 클라이언트는 <style>을 지우는 경우가 많다).
+    값은 모두 자동 이스케이프된다 (기사 본문·모델 출력에 HTML이 있어도 실행되지 않음). -#}
+
+{%- set ICON = {"있음": "✅", "없음": "❌", "수정 필요": "⚠️", "판단 근거 없음": "❔", "점검 대상 아님": "➖"} -%}
+{%- set COLOR = {"있음": "#1a7f37", "없음": "#cf222e", "수정 필요": "#9a6700", "판단 근거 없음": "#57606a", "점검 대상 아님": "#57606a"} -%}
+{%- set TARGET_LABEL = {"침해사고": "사고 원인 대응 여부", "법·제도": "법 변경 반영 여부", "취약점": "권고 대책 반영 여부"} -%}
+
+{% macro report(summary, coverage, proposals, names, source_url="", label_prefix="", warnings=[]) -%}
+<div style="margin:0 0 20px 0; line-height:1.6;">
+  <div style="font-size:17px; font-weight:700; margin-bottom:6px;">
+    ■ {{ summary.title }}
+    <span style="font-size:12px; font-weight:600; padding:2px 8px; border-radius:10px; background:#eaeef2; color:#24292f; vertical-align:middle;">{{ summary.category }}</span>
+    {% if source_url %}<a href="{{ source_url }}" target="_blank" rel="noopener noreferrer" style="font-size:13px; font-weight:400;">🔗원문</a>{% endif %}
+  </div>
+  <div style="margin:0 0 8px 12px;"><b>· 요약:</b> {{ summary.summary }}</div>
+
+  {% if coverage and coverage[0].verdict == "점검 대상 아님" %}
+    <div style="margin-left:12px; color:#57606a;">· 체크리스트 점검 대상 아님 ({{ summary.category }})</div>
+  {% else %}
+    <div style="margin-left:12px;"><b>· 체크리스트 점검</b> ({{ TARGET_LABEL.get(summary.category, "점검 대상별") }})</div>
+    <table style="border-collapse:collapse; margin:4px 0 8px 24px; font-size:14px;">
+    {% for c in coverage %}
+      <tr>
+        <td style="padding:4px 8px 4px 0; vertical-align:top; white-space:nowrap; color:#57606a;">[{{ label_prefix }}{{ "abcdefghijklmnopqrstuvwxyz"[loop.index0] }}]</td>
+        <td style="padding:4px 0; vertical-align:top;">
+          {{ c.target }}
+          <div>
+            <span style="font-weight:700; color:{{ COLOR.get(c.verdict, '#24292f') }};">→ {{ ICON.get(c.verdict, "") }} {{ c.verdict }}</span>
+            {% if c.evidence_ids %}<span style="color:#57606a;">({% for e in c.evidence_ids %}{{ e }} {{ names.get(e, "") }}{% if not loop.last %}, {% endif %}{% endfor %})</span>{% endif %}
+          </div>
+          <div style="color:#57606a; font-size:13px;">{{ c.reason }}</div>
+        </td>
+      </tr>
+    {% endfor %}
+    </table>
+  {% endif %}
+
+  {% for p in proposals %}
+    <div style="margin:6px 0 6px 12px; padding:8px 12px; border-left:3px solid #9a6700; background:#fff8c5;">
+      <div><b>· 제안 {{ loop.index }}</b>
+        ({% if p.type == "수정" %}수정: {{ p.target_id }}{% else %}신규: {{ p.area or "분야 미정" }}{% endif %})
+        ← [{{ label_prefix }}{{ "abcdefghijklmnopqrstuvwxyz"[p.judgment_no - 1] }}] {{ p.title }}</div>
+      <div style="margin-left:12px;">점검항목: {{ p.item }}</div>
+      <div style="margin-left:12px;">점검내용: {{ p.content }}</div>
+    </div>
+  {% endfor %}
+
+  {% for w in warnings %}
+    <div style="margin:6px 0 0 12px; color:#9a6700;">⚠ {{ w }}</div>
+  {% endfor %}
+</div>
+{%- endmacro %}

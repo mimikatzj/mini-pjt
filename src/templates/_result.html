@@ -1,0 +1,26 @@
+{#- 점검 결과 조각 (POST /ui/check 응답). 페이지가 fetch로 받아 결과 영역에 넣는다. -#}
+{% from "_report.html" import report %}
+{% if result.refusal %}
+  <div class="notice">{{ result.refusal }}</div>
+{% else %}
+  {{ report(result.summary, result.coverage, result.proposals, names, source_url=result.source_url, warnings=result.warnings) }}
+{% endif %}
+
+{% if result.contexts %}
+<details>
+  <summary>참고한 체크리스트 항목 ({{ result.contexts | length }}건)</summary>
+  {% for c in result.contexts %}
+    <div class="ctx"><b>{{ c.doc_id }}</b> <pre>{{ c.text }}</pre></div>
+  {% endfor %}
+</details>
+{% endif %}
+
+<details>
+  <summary>처리 단계 보기 ({{ result.trace | map(attribute="step") | join(" → ") }})</summary>
+  {% for t in result.trace %}
+    <div class="step"><b>{{ loop.index }}. {{ t.step }}</b>
+      <pre>입력: {{ t.input | pretty }}
+출력: {{ t.output | pretty }}</pre>
+    </div>
+  {% endfor %}
+</details>

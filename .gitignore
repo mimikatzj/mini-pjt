@@ -1,0 +1,17 @@
+# 비밀 정보
+.env
+
+# 파이썬
+.venv/
+__pycache__/
+*.pyc
+
+# 실행 중 생성 (dry-run 미리보기, 첨부 임시 파일, 트레이스)
+tmp/
+trace/
+
+# 검색 인덱스 (python -m src.retriever --build로 다시 만든다)
+data/chroma/
+
+# Claude Code 개인 설정
+.claude/settings.local.json
