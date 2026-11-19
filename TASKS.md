@@ -86,19 +86,20 @@
 
 **목표**: SERVICE.md 16장의 평가를 실행하고 개선폭을 남긴다.
 
-- [ ] **3-1. 인-아웃 세트 초안 (positive, negative)** (1시간) — 실제 기사 본문으로 positive 6~8건, negative 3~4건을 작성하고 기대 근거 항목 ID를 적는다. 기대값은 사용자가 검토한다.
+- [x] **3-1. 인-아웃 세트 초안 (positive, negative)** (1시간) — 실제 기사 본문으로 positive 6~8건, negative 3~4건을 작성하고 기대 근거 항목 ID를 적는다. 기대값은 사용자가 검토한다.
   - 확인: `evaluation/test_queries.csv`가 7개 컬럼 형식이고, positive·negative 케이스마다 `expected_traits`에 기대 항목 ID가 있다.
-- [ ] **3-2. 인-아웃 세트 완성 (edge, guardrail)** (1시간) — edge 4~5건, guardrail 3건을 추가해 15~20건을 채운다.
+- [x] **3-2. 인-아웃 세트 완성 (edge, guardrail)** (1시간) — edge 4~5건, guardrail 3건을 추가해 15~20건을 채운다.
   - 확인: 전체 15건 이상이고 카테고리 비율이 SERVICE.md 16.1과 비슷하다 (positive 40%, negative 20%, edge 25%, guardrail 15%).
-- [ ] **3-3. 평가 스크립트: 통과 판정** (1시간) — `evaluation/run_eval.py`가 각 케이스를 질의 모드로 실행하고, LLM-as-Judge(Pydantic)로 `expected_traits` 충족과 `forbidden` 미포함을 판정한다 (실습 `day7_practice/llm_judge.py`, `run_eval.py` 참고).
+- [x] **3-3. 평가 스크립트: 통과 판정** (1시간) — `evaluation/run_eval.py`가 각 케이스를 질의 모드로 실행하고, LLM-as-Judge(Pydantic)로 `expected_traits` 충족과 `forbidden` 미포함을 판정한다 (실습 `day7_practice/llm_judge.py`, `run_eval.py` 참고).
   - 확인: 전체 케이스가 실행되어 케이스별 통과/실패와 사유가 표로 출력된다.
-- [ ] **3-4. 평가 스크립트: RAGAS 4개 지표** (45분) — context_recall·precision은 코드로, faithfulness·answer_relevancy는 LLM-as-Judge로 계산한다.
+- [x] **3-4. 평가 스크립트: RAGAS 4개 지표** (45분) — context_recall·precision은 코드로, faithfulness·answer_relevancy는 LLM-as-Judge로 계산한다.
   - 확인: 4개 지표가 0~1 값으로 출력되고, 1건을 손으로 계산한 context_recall과 일치한다.
-- [ ] **3-5. 1차 리포트** (30분) — 결과를 `evaluation/round1_report.md`로 저장한다 (통과율, 지표, 실패 케이스 원인 분석).
+- [x] **3-5. 1차 리포트** (30분) — 결과를 `evaluation/round1_report.md`로 저장한다 (통과율, 지표, 실패 케이스 원인 분석).
   - 확인: 리포트에 통과율, 4개 지표, 실패 케이스별 원인이 모두 있다.
-- [ ] **3-6. 개선** (1시간) — 1차 실패 원인별로 프롬프트, 검색 설정(가중치, 후보 수), 가드레일 규칙을 조정한다.
+- [x] **3-6. 개선** (1시간) — 1차 실패 원인별로 프롬프트, 검색 설정(가중치, 후보 수), 가드레일 규칙을 조정한다.
   - 확인: 개선 항목 목록이 정리되어 있고, 해당 실패 케이스를 다시 돌리면 통과한다.
-- [ ] **3-7. 2차 평가와 리포트** (45분) — 전체를 다시 평가해 `evaluation/round2_report.md`에 개선 내용과 개선폭을 남기고, README의 평가 수치를 채운다.
+  - 결과: 1차 실패 8건 중 7건 통과 (1, 3, 6, 7, 12, 13, 16). 4번은 기대값(3.3.2 인용)을 유지하고 실패로 남기기로 결정 — 이 판본의 3.3.2는 위탁 '공개' 중심이라 수탁사 감독 근거로 약하고, 체크리스트에 수탁사 관리 항목이 없는 것이 근본 원인 (사용자 결정, 2026-11-19). 개선 목록은 round2_report.md에 정리.
+- [x] **3-7. 2차 평가와 리포트** (45분) — 전체를 다시 평가해 `evaluation/round2_report.md`에 개선 내용과 개선폭을 남기고, README의 평가 수치를 채운다.
   - 확인: 리포트에 1차 대비 통과 건수 변화와 지표 변화가 있고, README의 "RAGAS 평가 결과", "인-아웃 세트 통과율"이 채워져 있다.
 
 ---

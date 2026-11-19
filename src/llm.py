@@ -93,6 +93,17 @@ def get_structured_llm(role: str, schema: type[BaseModel], temperature: float = 
     return _with_fallbacks(role, lambda m: m.with_structured_output(schema), temperature)
 
 
+def get_fixed_structured_llm(model_id: str, schema: type[BaseModel], temperature: float = 0.0) -> Runnable:
+    """대체 모델 없이 지정한 모델 하나만 쓰는 구조화 출력 모델 (평가 채점관용). 마스킹·재시도는 적용한다.
+
+    채점관이 실행마다 다른 모델로 바뀌면 1차·2차 평가를 비교할 수 없으므로 대체 모델을 붙이지 않는다.
+    """
+    model = _chat_model(model_id, temperature).with_structured_output(schema).with_retry(
+        stop_after_attempt=config.LLM_RETRY_ATTEMPTS, wait_exponential_jitter=True,
+    )
+    return _masker | model
+
+
 def _with_fallbacks(role: str, wrap, temperature: float) -> Runnable:
     ids = _model_ids(role)
     runnables = []

@@ -15,8 +15,9 @@ class NewsSummary(BaseModel):
     """기사 1건 요약 (summarize_news 출력). 카테고리에 맞는 핵심 정보 필드만 채우고 나머지는 비운다."""
 
     category: Category = Field(
-        description="침해사고: 실제 공격·유출 사고 / 취약점: 제품 취약점·보안 권고 / "
-        "법·제도: 법령·고시·가이드라인 제정·개정 / 기타: 위에 해당하지 않는 단순 소식(제품 출시, 행사, 인사 등)"
+        description="침해사고: 특정 조직이 실제로 당한 공격·유출 사고 보도 / "
+        "취약점: 제품 취약점 공지, 기관의 보안 권고문·주의보(공격 그룹의 수법과 권고 대책을 알리는 문서 포함) / "
+        "법·제도: 법령·고시·가이드라인 제정·개정 / 기타: 위에 해당하지 않는 단순 소식(제품 출시, 행사, 인사, 실적, 예산 등)"
     )
     title: str = Field(description="기사 내용을 나타내는 한국어 제목 한 줄")
     summary: str = Field(description="기사 핵심을 한국어 3~5문장으로 요약")
@@ -30,7 +31,8 @@ class NewsSummary(BaseModel):
 
     # 법·제도
     changed_clauses: list[str] = Field(default_factory=list, description="[법·제도] 바뀌는 조항과 바뀌는 내용")
-    effective_date: str = Field(default="", description="[법·제도] 시행일 (기사에 없으면 빈 칸)")
+    effective_date: str = Field(default="", description="[법·제도] 시행일 또는 시행 예정일 (기사에 없으면 빈 칸)")
+    stage: str = Field(default="", description="[법·제도] 진행 단계: 입법예고, 국회 통과, 국무회의 의결, 공포, 시행 중 하나 (기사에 없으면 빈 칸)")
     targets: str = Field(default="", description="[법·제도] 적용 대상")
 
 

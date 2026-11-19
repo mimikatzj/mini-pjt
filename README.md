@@ -105,18 +105,19 @@ curl -X POST http://localhost:8000/query \
 
 ## RAGAS 평가 결과
 
-평가 후 기입합니다. 산출 방법은 [SERVICE.md 16장](SERVICE.md#16-평가)을 참고하세요.
+2차 평가(2026-11-19, 20건) 기준입니다. `ragas` 라이브러리 없이 같은 정의로 계산했습니다 (recall·precision은 코드, faithfulness·relevancy는 고정 채점관 LLM). 산출 방법은 [SERVICE.md 16장](SERVICE.md#16-평가)과 [evaluation/run_eval.py](evaluation/run_eval.py)를 참고하세요.
 
-- context_recall: 0.XX
-- context_precision: 0.XX
-- faithfulness: 0.XX
-- answer_relevancy: 0.XX
+- context_recall: 0.94 (1차 0.90)
+- context_precision: 0.77 (1차 0.86) — 후보를 넓혀 recall을 우선한 대가
+- faithfulness: 1.00 (1차 1.00)
+- answer_relevancy: 1.00 (1차 1.00)
 
 ## 인-아웃 세트 통과율 (자체 평가)
 
-- 1차 (Day 9 종료): XX / XX 통과
-- 2차 (Day 10 개선 후): XX / XX 통과
-- 개선폭: +XX 건 (주요 개선 사항: ...)
+- 1차 (Day 9 종료): 12 / 20 통과 (60%)
+- 2차 (Day 10 개선 후): 17 / 20 통과 (85%) — 가드레일 4/4, 무관한 기사 4/4
+- 개선폭: +5 건 (주요 개선 사항: 법·제도 답변에 "법령 원문 미확인"·진행 단계·시행일 표시, 보안 권고문 분류 기준, 판정 기준("일부만 다루면 수정 필요") 보강, 리랭킹 후보 5 → 8개와 대상별 근거 보장, 리랭킹 "통제 방향" 기준)
+- 1차 통과 12건은 2차에서도 모두 통과 (개선으로 깨진 사례 없음). 남은 실패 3건 중 1건은 테스트용 체크리스트 판본의 공백(수탁사 관리 항목 없음), 2건은 실행마다 통과·실패가 갈리는 경계 사례
 
 상세: [evaluation/round1_report.md](evaluation/round1_report.md), [evaluation/round2_report.md](evaluation/round2_report.md)
 

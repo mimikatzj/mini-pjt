@@ -18,9 +18,12 @@ from src.nodes.coverage import coverage_targets
 from src.retriever import fused_search, load_checklist, normalize_id, to_document
 from src.state import QueryExpansion, QueryState, RerankResult
 
-CANDIDATES_PER_TARGET = 5  # 리랭킹 전 대상 1개당 후보 수
+# 리랭킹 전 대상 1개당 후보 수. 5 → 8 (3-6: 검색어 여러 개 중 하나에서만 1위인 항목이 순위 합산에서 밀려 후보에 못 드는 사례)
+CANDIDATES_PER_TARGET = 8
 MAX_EXPANDED = 3           # 대상 1개당 확장 검색어 최대 개수
 MIN_SCORE = 1              # 이 점수 미만은 최종 결과에 넣지 않는다
+GUARANTEE_MIN_SCORE = 2    # 대상마다 보장해서 넣는 항목의 최소 점수
+GUARANTEE_PER_TARGET = 2   # 대상마다 보장하는 항목 수 (1위 포함)
 
 
 # ── 1. 쿼리 확장 ─────────────────────────────────────
@@ -95,11 +98,22 @@ def rerank(targets: list[str], candidates: dict[int, list[str]]) -> dict[int, li
 # ── 4. 최종 선택 ─────────────────────────────────────
 
 def select_final(ranked: dict[int, list[tuple[str, int]]], limit: int) -> list[str]:
-    """대상마다 최고 점수 항목을 먼저 넣고(점수가 0이어도 검색 1위를 넣는다), 남은 자리는 점수순으로 채운다."""
+    """최종 근거 항목을 고른다.
+
+    1) 대상마다 최고 점수 항목을 넣는다 (점수가 0이어도 검색 1위를 넣어 대상마다 후보가 하나는 있게 한다).
+    2) 대상마다 2점 이상인 항목을 GUARANTEE_PER_TARGET개까지 더 보장한다. 이 단계는 limit을 넘을 수 있다.
+       (1차 평가: 2점 받은 관련 항목이 다른 대상의 같은 점수 항목에 밀려 잘린 사례가 있었다 → 3-6 개선)
+    3) 남은 자리는 limit까지 점수순으로 채운다.
+    """
     final: list[str] = []
     for no in sorted(ranked):
         if ranked[no] and ranked[no][0][0] not in final:
             final.append(ranked[no][0][0])
+    for no in sorted(ranked):
+        strong = [i for i, s in ranked[no] if s >= GUARANTEE_MIN_SCORE][:GUARANTEE_PER_TARGET]
+        for i in strong:
+            if i not in final:
+                final.append(i)
     rest = sorted(
         ((s, i) for items in ranked.values() for i, s in items if s >= MIN_SCORE and i not in final),
         key=lambda x: -x[0],

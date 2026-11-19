@@ -7,6 +7,18 @@ ICON = {"있음": "✅", "없음": "❌", "수정 필요": "⚠️", "판단 근
 TARGET_LABEL = {"침해사고": "사고 원인", "법·제도": "변경 조항", "취약점": "권고 대책"}
 
 
+def law_notice(summary) -> str:
+    """법·제도 기사의 판정 주의 문구 (SERVICE.md 11장). 1차에서는 법령 원문을 확인하지 않으므로 항상 표시한다."""
+    parts = ["법령 원문 미확인 — 보도자료 요약 기준 판정"]
+    if summary.stage:
+        parts.append(f"단계: {summary.stage}")
+    if summary.effective_date:
+        parts.append(f"시행(예정)일: {summary.effective_date}")
+    if summary.stage and summary.stage != "시행":
+        parts.append("확정 전 내용일 수 있으니 확정 후 다시 확인")
+    return " · ".join(parts)
+
+
 def format_answer(state: QueryState) -> dict:
     summary = state["summary"]
     names = {k: v["점검항목"] for k, v in load_checklist().items()}
@@ -17,6 +29,8 @@ def format_answer(state: QueryState) -> dict:
         lines.append("· 체크리스트 점검: 점검 대상 아님")
     else:
         lines.append(f"· 체크리스트 점검 ({TARGET_LABEL.get(summary.category, '점검 대상')}별)")
+        if summary.category == "법·제도":
+            lines.append(f"   ※ {law_notice(summary)}")
         for i, c in enumerate(coverage):
             refs = ", ".join(f"{e} {names.get(e, '')}" for e in c["evidence_ids"])
             lines.append(f"   [{chr(ord('a') + i)}] {c['target']}")

@@ -39,6 +39,8 @@ MODELS = {
     ],
 }
 LLM_RETRY_ATTEMPTS = 2  # 모델마다 시도 횟수 (boto3 자체 재시도와 별도). 그래도 실패하면 다음 모델로
+# 평가 채점관 모델 (evaluation/run_eval.py). 1차·2차 비교가 의미 있도록 대체 모델 없이 고정한다.
+JUDGE_MODEL = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 EMBEDDING_MODEL = "amazon.titan-embed-text-v2:0"
 
 # ── 건수·크기 제한 ──────────────────────────────────

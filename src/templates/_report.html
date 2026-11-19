@@ -19,6 +19,12 @@
     <div style="margin-left:12px; color:#57606a;">· 체크리스트 점검 대상 아님 ({{ summary.category }})</div>
   {% else %}
     <div style="margin-left:12px;"><b>· 체크리스트 점검</b> ({{ TARGET_LABEL.get(summary.category, "점검 대상별") }})</div>
+    {% if summary.category == "법·제도" %}
+    <div style="margin:2px 0 4px 24px; font-size:13px; color:#9a6700;">※ 법령 원문 미확인 — 보도자료 요약 기준 판정
+      {%- if summary.stage %} · 단계: {{ summary.stage }}{% endif %}
+      {%- if summary.effective_date %} · 시행(예정)일: {{ summary.effective_date }}{% endif %}
+      {%- if summary.stage and summary.stage != "시행" %} · 확정 전 내용일 수 있으니 확정 후 다시 확인{% endif %}</div>
+    {% endif %}
     <table style="border-collapse:collapse; margin:4px 0 8px 24px; font-size:14px;">
     {% for c in coverage %}
       <tr>
