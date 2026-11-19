@@ -95,6 +95,8 @@ class FileTracer(BaseCallbackHandler):
         with self._lock:
             totals = self._totals.pop(query_id, {"llm_calls": 0, "input_tokens": 0, "output_tokens": 0, "llm_seconds": 0.0, "errors": 0})
         self._write({"event": "query_end", "query_id": query_id, **totals, **extra})
+        if "total_seconds" in extra:
+            totals["total_seconds"] = extra["total_seconds"]
         return totals
 
 

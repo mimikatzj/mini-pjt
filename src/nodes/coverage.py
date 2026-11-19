@@ -1,6 +1,7 @@
-"""coverage_check 노드: 기사 요약 + 검색된 체크리스트 항목 → 점검 대상별 판정.
+"""coverage_check 노드: 기사 요약 + 검색된 체크리스트 항목 → 핵심 대상 1개의 판정.
 
-- 무엇을 점검할지(점검 대상)는 카테고리에 따라 코드가 정한다. "기타"는 LLM을 부르지 않는다.
+- 기사마다 핵심 점검 대상 1개(요약의 core_issue)만 점검한다 (사용자 결정: 간결 점검, 질의·배치 공통).
+  "기타"는 LLM을 부르지 않는다.
 - 판정은 LLM(고성능 모델)이 한다: 프롬프트 | 모델.with_structured_output(CoverageResult)
 - 판정에 인용된 근거 ID는 코드가 검증한다 (SERVICE.md 11장).
 """
@@ -22,14 +23,17 @@ NO_EVIDENCE = "판단 근거 없음"
 
 
 def coverage_targets(summary: NewsSummary) -> list[str]:
-    """카테고리별 점검 대상 (SERVICE.md 11장). 계산 규칙이므로 코드로 정한다."""
-    if summary.category == "침해사고":
-        return summary.causes
-    if summary.category == "법·제도":
-        return summary.changed_clauses
-    if summary.category == "취약점":
-        return summary.countermeasures
-    return []
+    """점검 대상: 기사마다 핵심 대상 1개 (SERVICE.md 11장). 계산 규칙이므로 코드로 정한다.
+
+    요약의 core_issue를 쓰고, 비어 있으면 카테고리별 목록(원인·변경 조항·대책)의 첫 항목을 쓴다. 기타는 점검하지 않는다.
+    """
+    lists = {"침해사고": summary.causes, "법·제도": summary.changed_clauses, "취약점": summary.countermeasures}
+    if summary.category not in lists:
+        return []
+    core = (summary.core_issue or "").strip()
+    if core:
+        return [core]
+    return lists[summary.category][:1]
 
 
 @lru_cache(maxsize=1)
@@ -40,9 +44,22 @@ def build_chain() -> Runnable:
         ("human",
          "<article_summary>\n카테고리: {category}\n제목: {title}\n요약: {summary}\n</article_summary>\n\n"
          "점검 대상:\n{targets}\n\n"
-         "<checklist>\n{checklist}\n</checklist>"),
+         "<checklist>\n{checklist}\n</checklist>\n\n"
+         "<past_judgments>\n{past}\n</past_judgments>"),
     ])
     return prompt | get_structured_llm("smart", CoverageResult)
+
+
+PAST_LIMIT = 10
+
+
+def format_past(past: list[dict], context_ids: set[str]) -> str:
+    """장기 메모리: 최근 판정 중 이번 근거 후보 항목과 겹치는 것만 골라 보여 준다 (배치 모드). 없으면 안내 문구."""
+    related = [p for p in past if set(p.get("evidence_ids") or []) & context_ids][:PAST_LIMIT]
+    if not related:
+        return "(참고할 과거 판정 없음)"
+    return "\n".join(f"- {p.get('created', '')} 대상: {p.get('target', '')} → {p.get('verdict', '')} "
+                     f"(근거 {', '.join(p.get('evidence_ids') or [])})" for p in related)
 
 
 def validate(result: CoverageResult, targets: list[str], context_ids: set[str]) -> list[dict]:
@@ -98,6 +115,7 @@ def coverage_check(state: QueryState) -> dict:
             "summary": summary.summary,
             "targets": "\n".join(f"{i}. {t}" for i, t in enumerate(targets, 1)),
             "checklist": format_checklist(contexts),
+            "past": format_past(state.get("past_coverage") or [], {c["doc_id"] for c in contexts}),
         })
         coverage = validate(result, targets, {c["doc_id"] for c in contexts})
 

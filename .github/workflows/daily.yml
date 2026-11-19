@@ -1,0 +1,73 @@
+# 보안 데일리 배치: 매일 오전 7시(KST) 실행하고, 누적 기록(DB)과 보기용 md를 저장소에 다시 커밋한다 (SERVICE.md 15장, P2).
+#
+# 필요한 저장소 Secrets (Settings → Secrets and variables → Actions):
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, GMAIL_ADDRESS, GMAIL_APP_PASSWORD, MAIL_TO
+# 필요한 권한: Settings → Actions → General → Workflow permissions = Read and write
+#
+# 흐름: 체크아웃(지난 DB 포함) → Python 설치 → 검색 인덱스 생성 → python main.py → 바뀐 DB·md 커밋
+# - 메일 발송에 실패하면 main.py가 종료 코드 1로 끝나고, 커밋 단계는 실행되지 않는다 (DB도 바뀌지 않음)
+# - 트레이스(trace/)와 미리보기(tmp/)는 .gitignore 대상이라 커밋되지 않는다
+
+name: daily-batch
+
+on:
+  schedule:
+    # 지금은 1회만: 11월 19일 UTC 22:00 = 2026-11-20(금) KST 07:00 (GitHub 사정으로 몇 분~수십 분 늦게 시작할 수 있음)
+    # cron에는 연도가 없어 내년 같은 날 다시 실행될 수 있으니, 실행 확인 후 매일 실행으로 바꾸거나 이 schedule을 지운다.
+    # 매일 실행: cron: "0 22 * * *"
+    - cron: "0 22 19 11 *"
+  workflow_dispatch:         # Actions 화면의 [Run workflow]로 수동 실행 (누를 때만 실행)
+
+permissions:
+  contents: write            # DB·md 자동 커밋
+
+concurrency:
+  group: daily-batch         # 같은 작업이 겹쳐 실행되지 않게 한다
+  cancel-in-progress: false
+
+jobs:
+  batch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TZ: Asia/Seoul         # 실행 ID·트레이스 파일 이름도 한국 시각으로
+      PYTHONUNBUFFERED: "1"
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+      MAIL_TO: ${{ secrets.MAIL_TO }}
+
+    steps:
+      - name: 저장소 내려받기
+        uses: actions/checkout@v4
+
+      - name: Python 3.14 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: 라이브러리 설치
+        run: pip install -r requirements.txt
+
+      - name: 체크리스트 검색 인덱스 생성 (data/chroma는 커밋하지 않으므로 매번 만든다)
+        run: python -m src.retriever --build
+
+      - name: 배치 실행 (수집 → 점검 → 메일 발송 → 기록 저장)
+        run: python main.py
+
+      - name: 누적 기록과 보기용 md 커밋
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/agent.db output/
+          if git diff --cached --quiet; then
+            echo "바뀐 기록이 없습니다."
+            exit 0
+          fi
+          git commit -m "배치 기록 $(date +%Y-%m-%d)"
+          # 실행 중에 다른 커밋이 올라왔으면 위에 쌓은 뒤 올린다
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

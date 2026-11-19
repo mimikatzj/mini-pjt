@@ -43,8 +43,9 @@ INJECTION_PATTERNS: list[re.Pattern] = [re.compile(p, re.IGNORECASE) for p in [
     r"disregard (the |all )?(previous|above|prior) (instructions?|prompts?)",
     r"you are now (a |an )?(different|new|unrestricted)",
     r"(reveal|show|print|repeat) (your |the )?(system prompt|hidden instructions?)",
-    r"(위의?|이전|기존|지금까지|앞의?) ?(모든 )?(지시|명령|규칙|프롬프트|설정)[은는를이가]? ?.{0,8}(무시|잊|버려|따르지 ?마)",
-    r"(시스템 ?프롬프트|숨겨진 (지시|프롬프트)|첫 ?(번째)? ?지시문?|내부 (지시|설정)).{0,10}(공개|출력|알려|보여)",
+    # "지금까지 (받은) 지시는 전부 무시"처럼 사이에 짧은 수식어가 끼는 경우도 잡는다 (3차 평가 18번)
+    r"(위의?|이전|기존|지금까지|앞의?) ?.{0,6}?(모든 )?(지시|명령|규칙|프롬프트|설정)[은는를이가]? ?.{0,8}(무시|잊|버려|따르지 ?마)",
+    r"(시스템 ?프롬프트|숨겨진 (지시|프롬프트)|첫 ?(번째)? ?지시문?|내부 (지시|설정)).{0,25}(공개|출력|알려|보여)",
     r"규칙 ?(이|가) ?없는 (AI|인공지능|모드)",
     r"(개발자|관리자|탈옥) ?모드",
     r"(너는|당신은) ?(이제|지금부터) ?.{0,20}(이다|야|입니다|역할)",
@@ -66,7 +67,7 @@ def find_injection(text: str) -> list[str]:
 # ── 질의 입력 검사 (질의 모드) ───────────────────────────
 URL_LINE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://\S+$")  # 공백 없는 한 줄 주소 (스킴 무관)
 
-MSG_NOT_ARTICLE = "기사 URL이나 본문을 입력해 주세요."
+MSG_NOT_ARTICLE = "이 입력은 처리할 수 없습니다. 점검할 보안 기사 URL이나 본문을 입력해 주세요."
 MSG_TOO_LONG = f"입력이 너무 깁니다. 본문은 {config.QUERY_MAX_CHARS:,}자 이하로 입력해 주세요."
 MSG_BAD_SCHEME = "http 또는 https로 시작하는 기사 주소만 입력할 수 있습니다."
 MSG_INJECTION = "처리할 수 없는 요청입니다. 점검할 기사 URL이나 본문을 입력해 주세요."

@@ -9,13 +9,15 @@
 채점은 두 단계다. 최종 통과 = 코드 검사 통과 AND LLM 채점 통과.
   1) 코드 검사 (계산·규칙 판정은 코드로):
      - "근거 항목 X.Y.Z 인용" → 답변에 그 ID가 있는가
+     - "근거 항목 A/B/C 중 하나 인용" → 답변에 셋 중 하나라도 있는가 (간결 점검: 핵심 대상이 여러 원인 중 하나일 때)
      - expected_tools → 응답 trace에 그 단계가 있는가
      - forbidden 중 문자 그대로 비교할 수 있는 값(숫자·@ 포함, 공백 없음) → 답변에 그대로 나오지 않는가
   2) LLM-as-Judge (고정 모델, Pydantic): expected_traits 충족, forbidden 미포함을 의미로 판정
 
 RAGAS 4개 지표 (ragas 라이브러리 없이 같은 정의로 계산, SERVICE.md 16.2):
-  - context_recall    = |기대 항목 ∩ 검색 결과| / |기대 항목|                          (코드, 기대 항목이 있는 사례)
-  - context_precision = Σ_k (precision@k × rel_k) / (상위 K 안의 기대 항목 수)            (코드, RAGAS 정의)
+  - context_recall    = 검색 결과에 들어간 기대 묶음 수 / 기대 묶음 수                    (코드, 기대 항목이 있는 사례)
+                        기대 묶음: "X 인용"은 X 하나, "A/B/C 중 하나 인용"은 A·B·C 중 하나만 검색돼도 맞은 것으로 센다
+  - context_precision = Σ_k (precision@k × rel_k) / (상위 K 안의 기대 항목 수)            (코드, RAGAS 정의. 묶음 안 항목은 모두 관련 항목)
   - faithfulness      = 검색 결과 원문으로 뒷받침되는 주장 수 / 답변의 체크리스트 관련 주장 수 (LLM이 주장별 판정, 비율은 코드)
   - answer_relevancy  = 입력 기사 핵심을 다루는 정도 0~4점 / 4                          (LLM, 거절되지 않은 사례)
 """
@@ -41,6 +43,12 @@ from src.llm import get_fixed_structured_llm  # noqa: E402
 
 CASES_PATH = ROOT / "evaluation" / "test_queries.csv"
 EXPECTED_ID = re.compile(r"근거 항목 (\d+\.\d+\.\d+) 인용")
+EXPECTED_ONE_OF = re.compile(r"근거 항목 (\d+\.\d+\.\d+(?:/\d+\.\d+\.\d+)+) 중 하나 인용")
+
+
+def expected_groups(traits: str) -> list[list[str]]:
+    """기대 근거 항목 묶음. "X 인용"은 [X], "A/B/C 중 하나 인용"은 [A, B, C]."""
+    return [[i] for i in EXPECTED_ID.findall(traits)] + [g.split("/") for g in EXPECTED_ONE_OF.findall(traits)]
 ANSWER_LIMIT = 6000  # 채점관에게 보낼 답변 최대 글자 수
 
 
@@ -53,8 +61,9 @@ def code_checks(case: dict, result: dict) -> list[dict]:
     answer = result["answer"]
     steps = [t["step"] for t in result["trace"]]
     checks = []
-    for doc_id in EXPECTED_ID.findall(case["expected_traits"]):
-        checks.append({"check": f"근거 항목 {doc_id} 인용", "ok": doc_id in answer})
+    for group in expected_groups(case["expected_traits"]):
+        label = group[0] if len(group) == 1 else "/".join(group) + " 중 하나"
+        checks.append({"check": f"근거 항목 {label} 인용", "ok": any(doc_id in answer for doc_id in group)})
     for tool in split(case["expected_tools"]):
         checks.append({"check": f"단계 {tool} 실행", "ok": tool in steps})
     for item in split(case["forbidden"]):
@@ -104,11 +113,11 @@ def judge(case: dict, result: dict) -> JudgeResult:
 
 
 # ── 3) RAGAS 지표 ────────────────────────────────────
-def context_recall(expected: list[str], retrieved: list[str]) -> float | None:
-    """기대 항목 중 검색 결과에 들어간 비율. 기대 항목이 없으면 계산하지 않는다(None)."""
-    if not expected:
+def context_recall(groups: list[list[str]], retrieved: list[str]) -> float | None:
+    """기대 묶음 중 검색 결과에 들어간 비율 (묶음 안 항목 하나라도 있으면 맞음). 기대 항목이 없으면 계산하지 않는다(None)."""
+    if not groups:
         return None
-    return len(set(expected) & set(retrieved)) / len(set(expected))
+    return sum(any(i in retrieved for i in g) for g in groups) / len(groups)
 
 
 def context_precision(expected: list[str], retrieved: list[str]) -> float | None:
@@ -155,9 +164,10 @@ def ragas_llm(case: dict, answer: str, contexts: list[dict]) -> RagasJudge:
 
 def ragas(case: dict, r: dict) -> dict:
     """사례 1건의 RAGAS 지표. 해당하지 않는 지표는 None."""
-    expected = EXPECTED_ID.findall(case["expected_traits"])
+    groups = expected_groups(case["expected_traits"])
+    expected = sorted({i for g in groups for i in g})
     retrieved = [c["doc_id"] for c in r.get("contexts", [])]
-    out = {"context_recall": context_recall(expected, retrieved),
+    out = {"context_recall": context_recall(groups, retrieved),
            "context_precision": context_precision(expected, retrieved),
            "faithfulness": None, "answer_relevancy": None, "claims": [], "relevancy_reason": ""}
     refused = "refuse" in r.get("steps", [])

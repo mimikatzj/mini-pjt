@@ -4,7 +4,7 @@ from src.retriever import load_checklist
 from src.state import QueryState
 
 ICON = {"있음": "✅", "없음": "❌", "수정 필요": "⚠️", "판단 근거 없음": "❔", "점검 대상 아님": "➖"}
-TARGET_LABEL = {"침해사고": "사고 원인", "법·제도": "변경 조항", "취약점": "권고 대책"}
+TARGET_LABEL = {"침해사고": "핵심 사고 원인", "법·제도": "핵심 변경 내용", "취약점": "핵심 권고 대책"}
 
 
 def law_notice(summary) -> str:
@@ -28,7 +28,7 @@ def format_answer(state: QueryState) -> dict:
     if coverage and coverage[0]["verdict"] == "점검 대상 아님":
         lines.append("· 체크리스트 점검: 점검 대상 아님")
     else:
-        lines.append(f"· 체크리스트 점검 ({TARGET_LABEL.get(summary.category, '점검 대상')}별)")
+        lines.append(f"· 체크리스트 점검 ({TARGET_LABEL.get(summary.category, '점검 대상')})")
         if summary.category == "법·제도":
             lines.append(f"   ※ {law_notice(summary)}")
         for i, c in enumerate(coverage):

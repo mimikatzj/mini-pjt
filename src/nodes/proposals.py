@@ -16,6 +16,7 @@ from src.retriever import load_checklist, normalize_id
 from src.state import ProposalResult, QueryState
 
 NEEDS_PROPOSAL = ("없음", "수정 필요")
+MAX_PROPOSALS = 1  # 기사당 제안 수 상한 (사용자 결정)
 
 
 def needs_proposal(coverage: list[dict]) -> bool:
@@ -68,7 +69,10 @@ def validate(result: ProposalResult, targets: dict[int, dict]) -> tuple[list[dic
                 data["area"] = ""
         data["source_target"] = judgment["target"]
         accepted.append(data)
-    return accepted, dropped
+    # 기사당 제안은 최대 1건 (사용자 결정: 간결 점검). 점검 대상이 1개라 보통 1건이지만, 혹시 더 나오면 첫 제안만 쓴다
+    for extra in accepted[MAX_PROPOSALS:]:
+        dropped.append({"proposal": extra, "why": f"기사당 제안 최대 {MAX_PROPOSALS}건"})
+    return accepted[:MAX_PROPOSALS], dropped
 
 
 def draft_proposals(state: QueryState) -> dict:

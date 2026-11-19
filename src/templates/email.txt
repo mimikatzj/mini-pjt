@@ -1,0 +1,53 @@
+{#- 배치 모드 메일 텍스트 본문 (HTML을 못 보는 메일 프로그램용, SERVICE.md 12.1 표시 예시 형식) -#}
+{%- set ICON = {"있음": "✅", "없음": "❌", "수정 필요": "⚠️", "판단 근거 없음": "❔", "점검 대상 아님": "➖"} -%}
+{%- set TARGET_LABEL = {"침해사고": "핵심 사고 원인", "법·제도": "핵심 변경 내용", "취약점": "핵심 권고 대책"} -%}
+{{ subject }}
+
+{{ counts.articles }}건 점검 · 새 제안 {{ counts.new }}건 · 기존 제안에 근거 추가 {{ counts.attach }}건 · ISMS-P 세부점검항목 기준
+{% if not sections %}
+오늘은 새 소식이 없습니다.
+{% endif %}
+{%- for section in sections %}
+
+══════════════ {{ section.name }} ({{ section.articles | length }}건) ══════════════
+{%- for a in section.articles %}
+
+■ [{{ a.number }}] {{ a.summary.title if a.summary else a.item.title }} [{{ a.item.category }}] ({{ a.item.source }})
+  원문: {{ a.item.url }}
+{%- if a.error or not a.summary %}
+  · 요약 실패 — 원문을 직접 확인해 주세요.
+{%- else %}
+  · 요약: {{ a.summary.summary }}
+{%- if a.item.related %}
+  · 관련 기사 {{ a.item.related | length }}건: {% for r in a.item.related[:5] %}{{ r.title }}{% if not loop.last %} / {% endif %}{% endfor %}
+{%- endif %}
+{%- if a.coverage and a.coverage[0].verdict == "점검 대상 아님" %}
+  · 체크리스트 점검 대상 아님 ({{ a.item.category }})
+{%- else %}
+  · 체크리스트 점검 ({{ TARGET_LABEL.get(a.summary.category, "점검 대상별") }})
+{%- if a.summary.category == "법·제도" or a.item.category == "법·제도" %}
+     ※ 법령 원문 미확인 — 보도자료 요약 기준 판정{% if a.summary.stage %} · 단계: {{ a.summary.stage }}{% endif %}{% if a.summary.effective_date %} · 시행(예정)일: {{ a.summary.effective_date }}{% endif %}
+{%- endif %}
+{%- for c in a.coverage %}
+     [{{ a.number }}-{{ "abcdefghijklmnopqrstuvwxyz"[loop.index0] }}] {{ c.target }}
+         → {{ ICON.get(c.verdict, "") }} {{ c.verdict }}{% if c.evidence_ids %} ({% for e in c.evidence_ids %}{{ e }} {{ names.get(e, "") }}{% if not loop.last %}, {% endif %}{% endfor %}){% endif %}
+{%- endfor %}
+{%- endif %}
+{%- for p in a.proposals %}
+  · 제안 {{ p.proposal_id or loop.index }} ({% if p.type == "수정" %}수정: {{ p.target_id }}{% else %}신규: {{ p.area or "분야 미정" }}{% endif %}){% if p.merge and p.merge.startswith("기존") %} — 기존 제안에 근거 추가{% endif %}
+     점검항목: {{ p.item }}
+     점검내용: {{ p.content }}
+{%- endfor %}
+{%- for w in a.warnings %}
+  ⚠ {{ w }}
+{%- endfor %}
+{%- endif %}
+{%- endfor %}
+{%- endfor %}
+
+──────────────────────────────────────────────
+{%- for f in failures %}
+수집 실패: {{ f.source }}
+{%- endfor %}
+📂 누적 제안 목록: proposals.md (검토대기 {{ counts.pending }}건)
+판정과 제안은 AI가 작성한 초안입니다. 실제 체크리스트 반영 여부는 담당자가 결정합니다.

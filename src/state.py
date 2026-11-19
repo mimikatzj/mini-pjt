@@ -17,10 +17,17 @@ class NewsSummary(BaseModel):
     category: Category = Field(
         description="침해사고: 특정 조직이 실제로 당한 공격·유출 사고 보도 / "
         "취약점: 제품 취약점 공지, 기관의 보안 권고문·주의보(공격 그룹의 수법과 권고 대책을 알리는 문서 포함) / "
-        "법·제도: 법령·고시·가이드라인 제정·개정 / 기타: 위에 해당하지 않는 단순 소식(제품 출시, 행사, 인사, 실적, 예산 등)"
+        "법·제도: 보안·개인정보 관련 법령·고시·가이드라인 제정·개정, 과징금·처분, 감독기관 조사 / "
+        "기타: 위에 해당하지 않는 소식(제품 출시, 행사, 인사, 실적, 예산, 보안과 무관한 규제 변경 등)"
     )
     title: str = Field(description="기사 내용을 나타내는 한국어 제목 한 줄")
     summary: str = Field(description="기사 핵심을 한국어 3~5문장으로 요약")
+    core_issue: str = Field(
+        default="",
+        description="체크리스트로 점검할 핵심 대상 1개 (기타면 빈 칸). 침해사고: 사고를 일으킨 가장 결정적인 원인 / "
+        "법·제도: 가장 중요한 변경 내용 / 취약점: 가장 중요한 권고 대책. 한 문장으로 구체적으로. "
+        "침해사고는 결과(유출됐다)가 아니라 원인(어떻게 뚫렸나)을 쓴다",
+    )
 
     # 침해사고
     causes: list[str] = Field(default_factory=list, description="[침해사고] 사고 원인. 원인이 여러 개면 나눠서 적는다")
@@ -102,6 +109,26 @@ class ProposalResult(BaseModel):
     proposals: list[ProposalDraft]
 
 
+class BatchState(TypedDict, total=False):
+    """배치 모드 그래프 상태 (SERVICE.md 8·9장)."""
+
+    dry_run: bool
+    ignore_seen: bool                # 시험용: 이미 보낸 URL 제외를 끈다 (같은 기사로 두 번 실행해 제안 병합 확인)
+    checklist_ids: list[str]         # load_checklist
+    changed_items: list[str]         # load_checklist (P2 반영완료 감지용)
+    records: dict                    # load_records: seen_urls, proposals, rejected, recent_coverage
+    raw_items: list[dict]            # collect_news
+    collect_failures: list[dict]     # collect_news: 메일 하단 "수집 실패" 표시용
+    new_items: list[dict]            # dedupe → guard_input
+    top_news: list[dict]             # triage_news: 선별된 기사
+    articles: Annotated[list[dict], operator.add]  # process_article: 기사별 결과 (병렬 실행 결과를 모은다)
+    articles_merged: list[dict]      # merge_proposals: 제안마다 제안 번호(P-...)와 병합 결과를 붙인 기사별 결과
+    proposal_plan: list[dict]        # merge_proposals: new(새 제안) / attach(근거 추가) / rejected(반려 목록과 같음) 결정
+    mail: dict                       # compose_email: subject, html, text, counts
+    sent: dict                       # send_email: {"status": sent / failed / skipped(dry-run), "to", "error"}
+    trace: Annotated[list[dict], operator.add]
+
+
 class QueryState(TypedDict, total=False):
     """질의 모드 그래프 상태 (SERVICE.md 10장)."""
 
@@ -112,6 +139,7 @@ class QueryState(TypedDict, total=False):
     article: str                     # 점검할 기사 본문
     summary: NewsSummary             # summarize_news 결과
     contexts: list[dict]             # retrieve_checklist 결과: [{"doc_id", "text"}]
+    past_coverage: list[dict]        # 배치 모드만: 최근 30일 판정 기록 (장기 메모리, coverage_check가 참고)
     coverage: list[dict]             # coverage_check 결과
     proposals: list[dict]            # draft_proposals 결과 (질의 모드에서는 저장하지 않음)
     output_warnings: list[str]       # guard_output이 답변에 붙이는 확인 필요 안내

@@ -4,22 +4,31 @@
 
 {%- set ICON = {"있음": "✅", "없음": "❌", "수정 필요": "⚠️", "판단 근거 없음": "❔", "점검 대상 아님": "➖"} -%}
 {%- set COLOR = {"있음": "#1a7f37", "없음": "#cf222e", "수정 필요": "#9a6700", "판단 근거 없음": "#57606a", "점검 대상 아님": "#57606a"} -%}
-{%- set TARGET_LABEL = {"침해사고": "사고 원인 대응 여부", "법·제도": "법 변경 반영 여부", "취약점": "권고 대책 반영 여부"} -%}
+{%- set TARGET_LABEL = {"침해사고": "핵심 사고 원인", "법·제도": "핵심 변경 내용", "취약점": "핵심 권고 대책"} -%}
 
-{% macro report(summary, coverage, proposals, names, source_url="", label_prefix="", warnings=[]) -%}
+{#- 메일에서만 넘기는 값: number(기사 번호 "1"), source_name(출처), category(표시용 카테고리, 선별 단계 값),
+    related(같은 사건의 관련 기사). 웹 페이지는 넘기지 않으므로 기존 모양 그대로다. -#}
+{% macro report(summary, coverage, proposals, names, source_url="", label_prefix="", warnings=[],
+                number="", source_name="", category="", related=[]) -%}
+{%- set cat = category or summary.category -%}
 <div style="margin:0 0 20px 0; line-height:1.6;">
   <div style="font-size:17px; font-weight:700; margin-bottom:6px;">
-    ■ {{ summary.title }}
-    <span style="font-size:12px; font-weight:600; padding:2px 8px; border-radius:10px; background:#eaeef2; color:#24292f; vertical-align:middle;">{{ summary.category }}</span>
+    ■ {% if number %}[{{ number }}] {% endif %}{{ summary.title }}
+    <span style="font-size:12px; font-weight:600; padding:2px 8px; border-radius:10px; background:#eaeef2; color:#24292f; vertical-align:middle;">{{ cat }}</span>
+    {% if source_name %}<span style="font-size:13px; font-weight:400; color:#57606a;">({{ source_name }})</span>{% endif %}
     {% if source_url %}<a href="{{ source_url }}" target="_blank" rel="noopener noreferrer" style="font-size:13px; font-weight:400;">🔗원문</a>{% endif %}
   </div>
   <div style="margin:0 0 8px 12px;"><b>· 요약:</b> {{ summary.summary }}</div>
+  {% if related %}
+  <div style="margin:0 0 8px 12px; font-size:13px; color:#57606a;">· 관련 기사 {{ related | length }}건:
+    {% for r in related[:5] %}<a href="{{ r.url }}" target="_blank" rel="noopener noreferrer" style="color:#57606a;">{{ r.title }}</a>{% if r.source %} ({{ r.source }}){% endif %}{% if not loop.last %} / {% endif %}{% endfor %}</div>
+  {% endif %}
 
   {% if coverage and coverage[0].verdict == "점검 대상 아님" %}
-    <div style="margin-left:12px; color:#57606a;">· 체크리스트 점검 대상 아님 ({{ summary.category }})</div>
+    <div style="margin-left:12px; color:#57606a;">· 체크리스트 점검 대상 아님 ({{ cat }})</div>
   {% else %}
     <div style="margin-left:12px;"><b>· 체크리스트 점검</b> ({{ TARGET_LABEL.get(summary.category, "점검 대상별") }})</div>
-    {% if summary.category == "법·제도" %}
+    {% if summary.category == "법·제도" or cat == "법·제도" %}
     <div style="margin:2px 0 4px 24px; font-size:13px; color:#9a6700;">※ 법령 원문 미확인 — 보도자료 요약 기준 판정
       {%- if summary.stage %} · 단계: {{ summary.stage }}{% endif %}
       {%- if summary.effective_date %} · 시행(예정)일: {{ summary.effective_date }}{% endif %}
@@ -43,10 +52,12 @@
   {% endif %}
 
   {% for p in proposals %}
-    <div style="margin:6px 0 6px 12px; padding:8px 12px; border-left:3px solid #9a6700; background:#fff8c5;">
-      <div><b>· 제안 {{ loop.index }}</b>
+    {%- set merged = p.merge and p.merge.startswith("기존") -%}
+    <div style="margin:6px 0 6px 12px; padding:8px 12px; border-left:3px solid {{ '#57606a' if merged else '#9a6700' }}; background:{{ '#f6f8fa' if merged else '#fff8c5' }};">
+      <div><b>· 제안 {{ p.proposal_id or loop.index }}</b>
         ({% if p.type == "수정" %}수정: {{ p.target_id }}{% else %}신규: {{ p.area or "분야 미정" }}{% endif %})
-        ← [{{ label_prefix }}{{ "abcdefghijklmnopqrstuvwxyz"[p.judgment_no - 1] }}] {{ p.title }}</div>
+        ← [{{ label_prefix }}{{ "abcdefghijklmnopqrstuvwxyz"[p.judgment_no - 1] }}] {{ p.title }}
+        {% if merged %}<span style="font-size:12px; color:#57606a;">— 기존 제안에 근거 추가</span>{% endif %}</div>
       <div style="margin-left:12px;">점검항목: {{ p.item }}</div>
       <div style="margin-left:12px;">점검내용: {{ p.content }}</div>
     </div>
