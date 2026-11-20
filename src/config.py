@@ -32,7 +32,7 @@ MODELS = {
         "us.anthropic.claude-haiku-4-5-20251001-v1:0",
         "us.anthropic.claude-sonnet-4-5-20250929-v1:0",   # 대체: Haiku가 계속 실패하면 Sonnet
     ],
-    # 점검·제안·병합·재확인: coverage_check, draft_proposals, merge_proposals, recheck_proposals
+    # 점검·제안·병합·재확인: coverage_check(ReAct 점검 에이전트 포함), draft_proposals, merge_proposals, recheck_proposals
     "smart": [
         "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
         "us.anthropic.claude-haiku-4-5-20251001-v1:0",    # 대체: Sonnet이 계속 실패하면 Haiku (품질 낮음, trace에 기록)
@@ -61,6 +61,12 @@ DOC_MAX_PAGES = 30            # 문서 요약 시 읽을 최대 쪽수 (P2)
 RETRIEVE_K = 5                # 체크리스트 검색 결과 수
 # 하이브리드 검색 가중치 (BM25, 벡터). 실습 기본값 0.3/0.7보다 0.5/0.5가 검색 시험 14개에서 더 좋았다 (2-2, evaluation/retrieval_probe.py)
 HYBRID_WEIGHTS = (0.5, 0.5)
+# 점검 방식 (SERVICE.md 10.5, 사용자 결정 2026-11-20)
+#   "fixed": 검색 1회(쿼리 확장 → 하이브리드 → 리랭킹) → 점검. 처리 순서가 고정된다
+#   "react": 첫 검색 결과를 받은 점검 에이전트가 도구(재검색·항목 원문 조회)를 스스로 골라 더 조사한 뒤 점검한다
+# 배치 모드는 매일 같은 순서·비용으로 돌아야 하므로 fixed를 유지한다.
+COVERAGE_MODE = {"query": "react", "batch": "fixed"}
+REACT_MAX_TOOL_CALLS = 4      # ReAct 점검에서 기사 1건당 도구 호출 상한. 넘으면 그때까지 모은 항목으로 판정한다
 QUERY_MAX_CHARS = 20_000      # 질의 입력 최대 길이
 MIN_ARTICLE_CHARS = 100       # 이보다 짧은 본문은 기사가 아닌 입력(인사, 질문)으로 보고 안내한다
 

@@ -5,6 +5,10 @@
   python evaluation/run_eval.py --ids 6,13      일부 사례만 (개선 후 실패 사례 재확인용)
   python evaluation/run_eval.py --out evaluation/round1_result.json   결과 저장 위치 지정
   python evaluation/run_eval.py --rescore tmp/eval.json   에이전트를 다시 돌리지 않고 저장된 결과로 지표만 다시 계산
+  python evaluation/run_eval.py --coverage-mode fixed   점검 방식 지정 (생략하면 config.COVERAGE_MODE["query"], 기본 react)
+
+최근 판정 이력(DB)은 기본으로 끈다. DB 내용에 따라 결과가 바뀌면 회차끼리 비교할 수 없기 때문이다 (--use-history로 켬).
+ReAct 방식이면 사례마다 경로(바로 판정 / 원문 확인 / 재검색 / 상한 도달)와 도구 호출 수를 기록하고 분포를 낸다.
 
 채점은 두 단계다. 최종 통과 = 코드 검사 통과 AND LLM 채점 통과.
   1) 코드 검사 (계산·규칙 판정은 코드로):
@@ -57,15 +61,18 @@ def split(s: str) -> list[str]:
 
 
 # ── 1) 코드 검사 ─────────────────────────────────────
-def code_checks(case: dict, result: dict) -> list[dict]:
-    answer = result["answer"]
-    steps = [t["step"] for t in result["trace"]]
+# 시험지의 expected_tools는 고정 순서 단계 이름으로 적혀 있다. ReAct 점검에서 같은 역할을 하는 단계도 실행한 것으로 본다.
+# (retrieve_checklist는 ReAct에서도 첫 검색으로 그대로 실행된다)
+STEP_ALIASES = {"coverage_check": {"coverage_react.judge"}}
+
+
+def code_checks(case: dict, answer: str, steps: list[str]) -> list[dict]:
     checks = []
     for group in expected_groups(case["expected_traits"]):
         label = group[0] if len(group) == 1 else "/".join(group) + " 중 하나"
         checks.append({"check": f"근거 항목 {label} 인용", "ok": any(doc_id in answer for doc_id in group)})
     for tool in split(case["expected_tools"]):
-        checks.append({"check": f"단계 {tool} 실행", "ok": tool in steps})
+        checks.append({"check": f"단계 {tool} 실행", "ok": tool in steps or bool(STEP_ALIASES.get(tool, set()) & set(steps))})
     for item in split(case["forbidden"]):
         if " " not in item and re.search(r"[\d@]", item):  # 문자 그대로 비교할 수 있는 값 (전화번호, 이메일 등)
             checks.append({"check": f"금지 문자열 '{item}' 없음", "ok": item not in answer})
@@ -195,14 +202,24 @@ def summarize_metrics(results: list[dict]) -> dict:
 
 
 # ── 실행 ────────────────────────────────────────────
-def evaluate(case: dict) -> dict:
+def react_info(trace: list[dict]) -> dict | None:
+    """ReAct 점검 단계의 경로·도구 호출 수 (ReAct로 돌지 않았으면 None)."""
+    step = next((t for t in trace if t["step"] == "coverage_react.research"), None)
+    if not step:
+        return None
+    out = step["output"]
+    return {"path": out["path"], "tool_calls": out["tool_calls"], "collected": out["collected"],
+            "tools": [f"{x['tool']}({', '.join(map(str, x['args'].values()))})" for x in out["steps"] if x["action"] == "tool_call"]}
+
+
+def evaluate(case: dict, coverage_mode: str | None = None, use_history: bool = False) -> dict:
     started = time.time()
     try:
-        result = run_query(case["input"])
+        result = run_query(case["input"], coverage_mode=coverage_mode, use_history=use_history)
     except Exception as e:  # 에이전트 오류도 실패로 기록하고 다음 사례로 넘어간다
         return {"id": case["id"], "category": case["category"], "passed": False, "error": f"실행 오류: {type(e).__name__}: {e}",
                 "code_checks": [], "judge": None, "seconds": round(time.time() - started, 1)}
-    checks = code_checks(case, result)
+    checks = code_checks(case, result["answer"], [t["step"] for t in result["trace"]])
     verdict = judge(case, result)
     code_ok = all(c["ok"] for c in checks)
     r = {
@@ -215,6 +232,7 @@ def evaluate(case: dict) -> dict:
         "usage": next((t["output"] for t in result["trace"] if t["step"] == "usage"), {}),
         # 검색 단계 상세 (대상, 확장 검색어, 리랭킹 전후 후보, 최종 선택). 검색 누락 원인 분석용
         "retrieval": next((t for t in result["trace"] if t["step"] == "retrieve_checklist"), None),
+        "react": react_info(result["trace"]),
     }
     r["ragas"] = ragas(case, r)
     r["seconds"] = round(time.time() - started, 1)
@@ -237,7 +255,14 @@ def main() -> None:
     parser.add_argument("--ids", help="실행할 사례 id (쉼표 구분). 생략하면 전체")
     parser.add_argument("--out", default=str(ROOT / "evaluation" / "eval_result.json"), help="결과 JSON 저장 경로")
     parser.add_argument("--rescore", metavar="JSON", help="저장된 결과를 읽어 RAGAS 지표만 다시 계산 (에이전트 실행 없음)")
+    parser.add_argument("--coverage-mode", choices=["fixed", "react"], help="점검 방식 (생략하면 config.COVERAGE_MODE['query'])")
+    parser.add_argument("--use-history", action="store_true", help="최근 판정 이력(DB, 읽기 전용)을 점검에 참고 (기본 끔)")
     args = parser.parse_args()
+    mode = args.coverage_mode or config.COVERAGE_MODE["query"]
+    if args.rescore:  # 재채점은 원래 실행의 점검 방식·이력 설정을 그대로 쓴다
+        saved = json.loads(Path(args.rescore).read_text(encoding="utf-8"))
+        mode = saved.get("coverage_mode", mode)
+        args.use_history = saved.get("use_history", args.use_history)
 
     with open(CASES_PATH, encoding="utf-8-sig", newline="") as f:
         cases = list(csv.DictReader(f))
@@ -248,14 +273,19 @@ def main() -> None:
     if args.rescore:
         by_id = {c["id"]: c for c in cases}
         results = [r for r in json.loads(Path(args.rescore).read_text(encoding="utf-8"))["results"] if r["id"] in by_id]
-        print(f"지표 재계산: {len(results)}건 ({args.rescore}, 채점관 {config.JUDGE_MODEL})")
+        print(f"재채점: {len(results)}건 ({args.rescore}, 채점관 {config.JUDGE_MODEL}) — 코드 검사와 RAGAS 지표를 다시 계산 (LLM 채점 판정은 저장된 값)")
         for r in results:
+            if r.get("error"):
+                continue
+            r["code_checks"] = code_checks(by_id[r["id"]], r["answer"], r["steps"])
+            r["code_ok"] = all(c["ok"] for c in r["code_checks"])
+            r["passed"] = r["code_ok"] and r["judge_ok"]
             r["ragas"] = ragas(by_id[r["id"]], r)
     else:
-        print(f"평가 시작: {len(cases)}건 (채점관 {config.JUDGE_MODEL})")
+        print(f"평가 시작: {len(cases)}건 (점검 방식 {mode}, 이력 {'참고' if args.use_history else '끔'}, 채점관 {config.JUDGE_MODEL})")
         results = []
         for n, case in enumerate(cases, 1):
-            r = evaluate(case)
+            r = evaluate(case, mode, args.use_history)
             results.append(r)
             # flush: 파일로 보낼 때도 사례가 끝날 때마다 바로 기록되게 한다
             print(f"  [{n:>2}/{len(cases)}] #{case['id']:>2} {case['category']:9} {'PASS' if r['passed'] else 'FAIL'}  ({r['seconds']}초)", flush=True)
@@ -284,8 +314,29 @@ def main() -> None:
     metrics = summarize_metrics(results)
     print("\nRAGAS 평균: " + ", ".join(f"{m} {fmt(v['mean'])} (n={v['n']})" for m, v in metrics.items()))
 
+    # ── 시간·ReAct 경로 (계산은 코드) ──
+    secs = [r["seconds"] for r in results if "seconds" in r]
+    timing = {"total": round(sum(secs), 1), "mean": round(sum(secs) / len(secs), 1) if secs else None}
+    print(f"\n시간: 합계 {timing['total']}초, 사례당 평균 {timing['mean']}초")
+    reacts = [r["react"] for r in results if r.get("react")]
+    react_summary = None
+    if reacts:
+        paths: dict[str, int] = {}
+        for x in reacts:
+            paths[x["path"]] = paths.get(x["path"], 0) + 1
+        react_summary = {"n": len(reacts), "mean_tool_calls": round(sum(x["tool_calls"] for x in reacts) / len(reacts), 2),
+                         "paths": paths}
+        print(f"ReAct: {len(reacts)}건, 평균 도구 호출 {react_summary['mean_tool_calls']}회, 경로 " +
+              ", ".join(f"{k} {v}" for k, v in paths.items()))
+        print("\n| id | 경로 | 도구 호출 |\n|---|---|---|")
+        for r in results:
+            if r.get("react"):
+                print(f"| {r['id']} | {r['react']['path']} | {' → '.join(r['react']['tools']) or '-'} |")
+
     out = {"run_at": datetime.now().isoformat(timespec="seconds"), "judge_model": config.JUDGE_MODEL,
-           "passed": total, "total": len(results), "by_category": by_cat, "ragas": metrics, "results": results}
+           "coverage_mode": mode, "use_history": args.use_history,
+           "passed": total, "total": len(results), "by_category": by_cat, "ragas": metrics,
+           "timing": timing, "react": react_summary, "results": results}
     Path(args.out).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"결과 저장: {args.out}")
 

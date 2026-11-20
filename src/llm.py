@@ -93,6 +93,15 @@ def get_structured_llm(role: str, schema: type[BaseModel], temperature: float = 
     return _with_fallbacks(role, lambda m: m.with_structured_output(schema), temperature)
 
 
+def get_tool_llm(role: str, tools: list, temperature: float = 0.0) -> Runnable:
+    """도구를 고를 수 있는 채팅 모델 (ReAct 점검 에이전트용, SERVICE.md 10.5). 모델마다 bind_tools를 붙인 뒤 대체 모델로 묶는다.
+
+    답은 AIMessage로 온다: 도구를 부르려면 tool_calls가 채워지고, 조사를 마치면 tool_calls 없이 텍스트만 온다.
+    마스킹은 대화 전체(도구 결과 ToolMessage 포함)에 적용된다.
+    """
+    return _with_fallbacks(role, lambda m: m.bind_tools(tools), temperature)
+
+
 def get_fixed_structured_llm(model_id: str, schema: type[BaseModel], temperature: float = 0.0) -> Runnable:
     """대체 모델 없이 지정한 모델 하나만 쓰는 구조화 출력 모델 (평가 채점관용). 마스킹·재시도는 적용한다.
 

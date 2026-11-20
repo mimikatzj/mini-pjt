@@ -5,6 +5,7 @@
 - DB 접근 (connect_db, load_records, load_checklist_with_changes): 누적 기록 읽기 — 4-2
 - DB 쓰기 (save_run, prune_old_rows): commit_records 노드(4-9)만 부른다 (CLAUDE.md 구현 원칙)
 - 메일 발송 (send_mail): Gmail SMTP, HTML·텍스트 multipart — 4-8
+- 점검 에이전트 도구 (search_checklist, get_checklist_item): 질의 모드 ReAct 점검이 고르는 읽기 전용 @tool — 5-3
 
 주소 차단 규칙 (SERVICE.md 10.2 입력 보안 규칙, SSRF 방지):
 - http, https만 허용, 포트는 80·443만
@@ -29,8 +30,11 @@ from urllib.parse import urljoin, urlsplit
 import feedparser
 import requests
 from bs4 import BeautifulSoup
+from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 
 from src import config
+from src.retriever import load_checklist, normalize_id, search, to_document
 
 ALLOWED_SCHEMES = {"http", "https"}
 ALLOWED_PORTS = {80, 443}
@@ -453,6 +457,24 @@ def load_checklist_with_changes(conn: sqlite3.Connection) -> tuple[dict, list[st
     return checklist, sorted(changed)
 
 
+def read_recent_coverage(path=None) -> list[dict]:
+    """질의 모드용: 최근 30일 판정(장기 메모리)을 **읽기 전용**으로 읽는다. DB가 없으면 빈 목록.
+
+    질의 모드는 DB에 쓰지 않으므로(CLAUDE.md) connect_db(표 생성) 대신 읽기 전용 모드로 연다.
+    """
+    path = path or config.DB_PATH
+    if not path.exists():
+        return []
+    conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        return load_records(conn)["recent_coverage"]
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()
+
+
 def table_counts(conn: sqlite3.Connection) -> dict[str, int]:
     return {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in TABLES}
 
@@ -613,3 +635,67 @@ def send_mail(subject: str, html: str, text: str, recipients: list[str] | None =
     if refused:  # 일부 수신자만 거부된 경우
         raise RuntimeError(f"수신 거부된 주소 {len(refused)}개")
     return recipients
+
+
+# ── 점검 에이전트 도구 (질의 모드 ReAct 점검, SERVICE.md 10.5) ─────────────
+# LLM이 스스로 골라 부르는 읽기 전용 도구 2개. 실습 day4_practice/tools_basic.py 3단계(Pydantic 인자 스키마) 방식.
+# - 결과는 <checklist_result> 구분 표시로 감싼 텍스트(content)와, 이번 호출이 돌려준 항목 ID 목록(artifact)을 함께 돌려준다.
+#   artifact는 모델에는 보내지 않고, 점검 노드가 "도구로 실제 조회된 항목"을 모아 인용 ID를 검증하는 데 쓴다.
+# - 검색 결과는 요약형(점검항목·점검내용)만 보여 주고, 확인사항까지 담긴 원문은 get_checklist_item으로 본다.
+#   그래야 "애매할 때만 원문을 연다"는 선택이 의미가 있다.
+# - 오류를 예외로 올리지 않고 안내 문구로 돌려준다. 에이전트가 다음 차례에 고칠 수 있게 하기 위해서다 (실습 day4 tool_error.py).
+
+
+def format_checklist_brief(row: dict) -> str:
+    """검색 결과 한 줄: [ID] 점검항목 (분야): 점검내용."""
+    return f"[{row['id']}] {row['점검항목']} ({row['분야']}): {row['점검내용']}"
+
+
+def format_checklist_full(row: dict) -> str:
+    """항목 원문: 점검내용과 확인사항 전체 (검색 인덱스의 청크와 같은 형식)."""
+    return to_document(row).page_content
+
+
+class SearchChecklistInput(BaseModel):
+    query: str = Field(description="찾을 통제 내용을 체크리스트 표현에 가깝게 쓴 짧은 검색어. "
+                                   "예: '로그인 실패 횟수 제한', '백업 매체 소산 보관', '수탁자 교육 및 점검'",
+                       min_length=2, max_length=100)
+
+
+class GetChecklistItemInput(BaseModel):
+    item_id: str = Field(description="체크리스트 항목 ID. 예: '2.9.2'", min_length=1, max_length=20)
+
+
+@tool(args_schema=SearchChecklistInput, response_format="content_and_artifact")
+def search_checklist(query: str) -> tuple[str, list[str]]:
+    """ISMS-P 체크리스트에서 검색어와 관련된 항목 5개를 찾는다 (키워드 + 의미 검색).
+
+    이미 받은 검색 결과에 점검 대상을 다루는 항목이 없어 보일 때, 기사 용어 대신 체크리스트에서 쓸 법한
+    다른 표현으로 다시 찾는 데 쓴다. 같은 검색어를 되풀이하지 않는다.
+    결과는 항목 ID, 점검항목, 점검내용만 보여 준다. 확인사항까지 보려면 get_checklist_item을 쓴다.
+    """
+    checklist = load_checklist()
+    ids = [d.metadata["id"] for d in search(query, k=config.RETRIEVE_K) if d.metadata["id"] in checklist]
+    if not ids:
+        return f"<checklist_result>\n'{query}'와 관련된 항목을 찾지 못했습니다.\n</checklist_result>", []
+    body = "\n".join(format_checklist_brief(checklist[i]) for i in ids)
+    return f"<checklist_result>\n검색어: {query}\n{body}\n</checklist_result>", ids
+
+
+@tool(args_schema=GetChecklistItemInput, response_format="content_and_artifact")
+def get_checklist_item(item_id: str) -> tuple[str, list[str]]:
+    """체크리스트 항목 1개의 원문(점검내용과 확인사항 전체)을 돌려준다.
+
+    검색 결과의 한 줄 설명만으로는 그 항목이 점검 대상을 실제로 요구하는지 판단하기 어려울 때 쓴다.
+    판정 근거로 인용하려는 항목이 애매하면 먼저 원문을 확인한다. 없는 ID면 "그런 항목 없음"을 돌려준다.
+    """
+    checklist = load_checklist()
+    item_id = normalize_id(item_id)
+    row = checklist.get(item_id)
+    if row is None:
+        return (f"<checklist_result>\n그런 항목 없음: '{item_id}'. 검색 결과에 나온 ID(예: 2.9.2)를 쓰세요.\n"
+                f"</checklist_result>"), []
+    return f"<checklist_result>\n{format_checklist_full(row)}\n</checklist_result>", [item_id]
+
+
+CHECKLIST_TOOLS = [search_checklist, get_checklist_item]

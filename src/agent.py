@@ -5,13 +5,18 @@
                        ├─(URL)→ fetch_article ─(성공)─┘                 └─(기타 등 점검 대상 없음)──────────────→ coverage_check ─┴─(모두 있음 등)─────────────────────→ guard_output → format_answer → END
                        │                      └─(차단·실패)→ refuse → END
                        └─(거절·안내)→ refuse → END
+  점검 방식(config.COVERAGE_MODE["query"], 기본 react)이 react이면 "retrieve_checklist → coverage_check" 자리에
+  ReAct 점검 에이전트 coverage_react가 들어간다 (SERVICE.md 10.5):
+    summarize_news → coverage_react[첫 검색 → 에이전트 ↔ 도구 순환 → 판정 → 검증] ─┬→ draft_proposals → guard_output → …
+                                                                                   └→ guard_output → …
+  질의 모드도 최근 판정(장기 메모리)을 DB에서 읽기만 해서 점검에 참고한다 (쓰지 않음).
 
 배치 모드 (SERVICE.md 8·9장) — 현재(4-9):
   START ─┬→ load_checklist ─┐
          ├→ load_records ───┼→ dedupe → guard_input → triage_news ─(기사마다 Send, 병렬)→ process_article → END
          └→ collect_news ───┘
   process_article = 본문 확보 → [기사 그래프: summarize_news → retrieve_checklist → coverage_check → draft_proposals
-                    → guard_output → format_answer] (질의 모드와 같은 노드)
+                    → guard_output → format_answer] (질의 모드와 같은 노드. 점검 방식은 config.COVERAGE_MODE["batch"], 기본 fixed)
   process_article(병렬) 모두 끝 → merge_proposals(누적 제안과 비교: 새 제안 / 근거 추가 결정) → compose_email → send_email ─┬─(발송 성공)→ commit_records → END
                                                                                                                    └─(dry-run·발송 실패)→ END (아무것도 저장하지 않음)
   (선별된 기사가 없으면 triage_news → compose_email: "오늘은 새 소식이 없습니다" 메일)
@@ -36,6 +41,7 @@ from src.nodes.article import prepare_article
 from src.nodes.collect import collect_news
 from src.nodes.compose import compose_email
 from src.nodes.coverage import coverage_check, coverage_targets
+from src.nodes.coverage_react import coverage_react
 from src.nodes.dedupe import dedupe, guard_input
 from src.nodes.fetch import fetch_article
 from src.nodes.guard import guard_query, refuse
@@ -48,6 +54,7 @@ from src.nodes.retrieve import retrieve_checklist
 from src.nodes.summarize import summarize_news
 from src.nodes.triage import triage_news
 from src.state import BatchState, QueryState
+from src.tools import read_recent_coverage
 from src.tracer import tracer
 
 
@@ -61,7 +68,7 @@ def route_after_fetch(state: QueryState) -> Literal["summarize_news", "refuse"]:
 
 
 def route_after_summary(state: QueryState) -> Literal["retrieve_checklist", "coverage_check"]:
-    """점검 대상이 없으면(기타 카테고리 등) 검색을 건너뛴다. 규칙 판정이므로 코드로 한다."""
+    """점검 대상이 없으면(기타 카테고리 등) 검색을 건너뛴다. 규칙 판정이므로 코드로 한다. (고정 순서 점검용)"""
     return "retrieve_checklist" if coverage_targets(state["summary"]) else "coverage_check"
 
 
@@ -70,14 +77,37 @@ def route_after_coverage(state: QueryState) -> Literal["draft_proposals", "guard
     return "draft_proposals" if needs_proposal(state["coverage"]) else "guard_output"
 
 
-def build_query_graph():
+COVERAGE_MODES = ("fixed", "react")
+
+
+def add_coverage_nodes(builder: StateGraph, mode: str) -> None:
+    """점검 단계 노드를 붙인다. 요약 다음에 이어지고, 점검이 끝나면 route_after_coverage로 분기한다.
+
+    - fixed: summarize_news → (점검 대상 있으면) retrieve_checklist → coverage_check
+    - react: summarize_news → coverage_react (첫 검색·조사·판정을 노드 안에서 한다. 기타 기사는 바로 점검 대상 아님)
+    """
+    if mode not in COVERAGE_MODES:
+        raise ValueError(f"알 수 없는 점검 방식: {mode} (가능: {COVERAGE_MODES})")
+    if mode == "react":
+        builder.add_node("coverage_react", coverage_react)
+        builder.add_edge("summarize_news", "coverage_react")
+        builder.add_conditional_edges("coverage_react", route_after_coverage)
+        return
+    builder.add_node("retrieve_checklist", retrieve_checklist)
+    builder.add_node("coverage_check", coverage_check)
+    builder.add_conditional_edges("summarize_news", route_after_summary)
+    builder.add_edge("retrieve_checklist", "coverage_check")
+    builder.add_conditional_edges("coverage_check", route_after_coverage)
+
+
+def build_query_graph(coverage_mode: str | None = None):
+    """질의 모드 그래프. coverage_mode를 주지 않으면 config.COVERAGE_MODE["query"]를 쓴다."""
     builder = StateGraph(QueryState)
     builder.add_node("guard_query", guard_query)
     builder.add_node("refuse", refuse)
     builder.add_node("fetch_article", fetch_article)
     builder.add_node("summarize_news", summarize_news)
-    builder.add_node("retrieve_checklist", retrieve_checklist)
-    builder.add_node("coverage_check", coverage_check)
+    add_coverage_nodes(builder, coverage_mode or config.COVERAGE_MODE["query"])
     builder.add_node("draft_proposals", draft_proposals)
     builder.add_node("guard_output", guard_output)
     builder.add_node("format_answer", format_answer)
@@ -86,9 +116,6 @@ def build_query_graph():
     builder.add_conditional_edges("guard_query", route_after_guard)
     builder.add_conditional_edges("fetch_article", route_after_fetch)
     builder.add_edge("refuse", END)
-    builder.add_conditional_edges("summarize_news", route_after_summary)
-    builder.add_edge("retrieve_checklist", "coverage_check")
-    builder.add_conditional_edges("coverage_check", route_after_coverage)
     builder.add_edge("draft_proposals", "guard_output")
     builder.add_edge("guard_output", "format_answer")
     builder.add_edge("format_answer", END)
@@ -98,19 +125,16 @@ def build_query_graph():
 query_graph = build_query_graph()
 
 
-def build_article_graph():
-    """기사 1건 점검 그래프 (배치 모드용). 질의 모드 그래프에서 입력 검사·URL 처리만 뺀 것으로, 노드는 같다."""
+def build_article_graph(coverage_mode: str | None = None):
+    """기사 1건 점검 그래프 (배치 모드용). 질의 모드 그래프에서 입력 검사·URL 처리만 뺀 것으로, 노드는 같다.
+    점검 방식은 config.COVERAGE_MODE["batch"] (기본 fixed: 매일 같은 순서·비용으로 돌게 한다)."""
     builder = StateGraph(QueryState)
     builder.add_node("summarize_news", summarize_news)
-    builder.add_node("retrieve_checklist", retrieve_checklist)
-    builder.add_node("coverage_check", coverage_check)
+    add_coverage_nodes(builder, coverage_mode or config.COVERAGE_MODE["batch"])
     builder.add_node("draft_proposals", draft_proposals)
     builder.add_node("guard_output", guard_output)
     builder.add_node("format_answer", format_answer)
     builder.add_edge(START, "summarize_news")
-    builder.add_conditional_edges("summarize_news", route_after_summary)
-    builder.add_edge("retrieve_checklist", "coverage_check")
-    builder.add_conditional_edges("coverage_check", route_after_coverage)
     builder.add_edge("draft_proposals", "guard_output")
     builder.add_edge("guard_output", "format_answer")
     builder.add_edge("format_answer", END)
@@ -210,14 +234,35 @@ def run_batch(dry_run: bool = True, ignore_seen: bool = False) -> dict:
     return {**result, "trace": trace, "run_id": run_id}
 
 
-def run_query(question: str) -> dict:
-    """질의 1건(기사 URL 또는 본문)을 처리한다. API 응답 형식(SERVICE.md 10장)의 answer, contexts, trace를 돌려준다."""
+_query_graphs: dict[str, object] = {}
+
+
+def get_query_graph(coverage_mode: str | None = None):
+    """점검 방식별 질의 그래프 (평가에서 두 방식을 비교할 때 쓴다). 기본 방식은 미리 만든 query_graph."""
+    mode = coverage_mode or config.COVERAGE_MODE["query"]
+    if mode == config.COVERAGE_MODE["query"]:
+        return query_graph
+    if mode not in _query_graphs:
+        _query_graphs[mode] = build_query_graph(mode)
+    return _query_graphs[mode]
+
+
+def run_query(question: str, coverage_mode: str | None = None, use_history: bool = True) -> dict:
+    """질의 1건(기사 URL 또는 본문)을 처리한다. API 응답 형식(SERVICE.md 10장)의 answer, contexts, trace를 돌려준다.
+
+    coverage_mode: 점검 방식 ("fixed" / "react"). 주지 않으면 config.COVERAGE_MODE["query"].
+    use_history: 최근 판정(DB, 읽기 전용)을 점검에 참고할지. 평가에서 DB 내용에 따라 결과가 바뀌지 않게 끌 수 있다.
+    """
     pop_fallback_events(), pop_mask_events()  # 이전 실행의 기록이 섞이지 않게 비운다
     query_id = uuid.uuid4().hex[:12]
     started = time.time()
-    result = query_graph.invoke(
-        {"question": question, "trace": []},
-        config={"callbacks": [tracer], "metadata": {"query_id": query_id, "mode": "query"}},
+    mode = coverage_mode or config.COVERAGE_MODE["query"]
+    past = read_recent_coverage() if use_history else []
+    history_step = {"step": "load_history", "input": {"use_history": use_history, "coverage_mode": mode},
+                    "output": {"recent_judgments": len(past)}}
+    result = get_query_graph(mode).invoke(
+        {"question": question, "past_coverage": past, "trace": [history_step]},
+        config={"callbacks": [tracer], "metadata": {"query_id": query_id, "mode": "query", "coverage_mode": mode}},
     )
     trace = list(result["trace"])
     masked = pop_mask_events()

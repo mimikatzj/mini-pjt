@@ -148,19 +148,48 @@
 - [x] **5-1. README 완성** (45분) — 활용한 패턴, 실행 방법, 트라이앤에러 회고, 핵심 코드 위치(줄 번호)를 채운다.
   - 확인: 과제 README 템플릿의 모든 항목이 채워져 있고 "XX" 같은 빈 자리가 없다.
   - 결과: 활용 패턴에 Day 3(LangGraph 조건부 분기·Send 병렬) 추가, 간결 점검·도구 미사용 이유 설명, 트라이앤에러 회고(실패한 접근 9건과 바꾼 방법, 채택한 접근, 남은 한계), 핵심 코드 위치 22개를 줄 번호 링크로 기입(링크 대상 파일·줄 범위 자동 확인). 빈 자리·"기입" 문구 없음.
-- [ ] **5-2. 제출 점검** (45분) — 새 가상환경에서 README 순서대로 설치·실행해 보고, `.env`와 트레이스 파일이 커밋되지 않았는지 확인하고, 시연 화면을 캡처한다.
+### 질의 모드 ReAct 점검 (P2 "(선택) 2·4번 패턴"에서 옮김 — 사용자 결정, 2026-11-20)
+
+질의 모드의 "검색 → 점검" 두 단계를 도구를 가진 작은 ReAct 에이전트로 바꾼다. 배치 모드는 지금의 고정 순서를 유지한다.
+- 점검 방식은 설정으로 고른다: `COVERAGE_MODE = {"query": "react", "batch": "fixed"}` (방식 ③). 두 방식을 같은 시험지로 비교할 수 있게 한다.
+- 도구는 **결과를 보기 전에는 필요한지 알 수 없는 조회 2개**만 둔다: `search_checklist`(다른 검색어로 다시 찾기), `get_checklist_item`(항목 원문 확인). 모두 읽기 전용이다.
+- 지난 판정(이력)은 도구로 두지 않는다. 배치처럼 코드가 관련 이력을 골라 처음부터 넣는다.
+- 나머지 단계(요약, 제안, 출력 검사, 답변 형식)는 두 모드가 같이 쓴다. 메일 발송·DB 쓰기는 도구로 주지 않는다.
+- 실습 참고: `day3_practice/react_agent.py`, `day3_practice/cycle.py`, `day4_practice/toolnode_parallel.py`, `day4_practice/tool_error.py`.
+
+- [x] **5-2. ReAct 점검 설계 반영** (30분) — SERVICE.md에 질의 모드 ReAct 점검 설계를 적는다: 도구 2개와 쓰임, 반복 상한, 이력은 코드로 넣음, 인용 ID 검증 규칙, 배치는 고정 순서 유지. `src/config.py`에 `COVERAGE_MODE`와 도구 호출 상한 `REACT_MAX_TOOL_CALLS`(4)를 둔다.
+  - 확인: SERVICE.md의 패턴 표(2번 ReAct)와 점검 설명이 새 설계와 맞고, 두 값이 코드에 직접 쓰이지 않고 설정 파일에만 있다.
+  - 결과: SERVICE.md 10.5 신설(흐름도, 도구 2개와 쓰임, 경로 4가지, 안전장치) + 3.1 도구 표, 6.1, 6.3 패턴 표(2·4번 ✅, 기사 외 질문은 P2로 남김 — 사용자 결정), 9.3 모델 표, 10.3, 18장 결정 사항 갱신. 설계 보완: 첫 검색은 코드가 하고(도구를 안 써도 고정 순서와 같은 자료로 판정), 최종 판정은 에이전트가 모은 항목으로 기존 점검 체인(LCEL)이 낸다. `src/config.py`에 `COVERAGE_MODE`, `REACT_MAX_TOOL_CALLS = 4` 추가, 다른 코드에는 아직 쓰이지 않음(5-5에서 사용).
+- [x] **5-3. 점검 도구 2개** (30분) — `src/tools.py`에 `@tool` 함수 `search_checklist(query)`, `get_checklist_item(item_id)`를 만든다. 지금의 하이브리드 검색과 `data/checklist.csv`를 그대로 쓰고, 결과는 구분 표시로 감싼 텍스트로 돌려준다. docstring에 "언제 쓰는 도구인지"를 적는다.
+  - 확인: 도구를 단독으로 호출해 결과가 나오고, 없는 항목 ID에는 오류 대신 "그런 항목 없음"을 돌려주며, 모델에 넘어가는 이름·설명·인자 형식을 출력해 확인한다.
+  - 결과: `src/tools.py`에 `search_checklist`, `get_checklist_item`(실습 tools_basic 3단계: Pydantic 인자 스키마) 추가. 결과는 `<checklist_result>`로 감싼 텍스트와, 조회된 항목 ID 목록(artifact, `response_format="content_and_artifact"` — 모델에는 안 보내고 5-4의 인용 ID 검증에 씀)을 함께 돌려준다. 검색 결과는 요약형(ID·점검항목·점검내용), 원문 조회는 확인사항까지. 단독 호출 확인: '로그인 실패 횟수 제한' → 2.5.3 1위, '수탁자 교육 및 점검' → 3.3.2 포함, '[2.9.2] 백업 및 복구관리'처럼 써도 ID 정리 후 조회, '9.9.9' → "그런 항목 없음"(artifact 빈 목록), 1글자 검색어 → 인자 검증 오류. 모델에 넘어가는 도구 정의(이름·설명·인자 스키마) 출력 확인. 기존 모듈(main, agent, api) 정상 import.
+- [x] **5-4. ReAct 점검 노드** (1시간) — `src/nodes/coverage_react.py`: LLM(`bind_tools`) ↔ `ToolNode` 순환 그래프. 첫 입력은 요약의 핵심 대상, 첫 검색 결과(코드, 기존 검색), 관련 이력(코드로 고름)이다. 에이전트가 도구를 더 부르지 않거나 상한에 이르면 조사를 끝내고, 모은 항목과 조사 메모로 기존 점검 체인(`CoverageResult`, LCEL)이 판정한다 (SERVICE.md 10.5). 인용 ID는 **이번 실행에서 도구가 실제로 돌려준 항목**에 있을 때만 인정하고, 아니면 "판단 근거 없음"으로 바꾼다. LLM 호출은 `src/llm.py` 래퍼(마스킹·재시도·대체 모델)를 거치고, 도구 호출마다 `trace`에 `{step, input, output}`을 남긴다.
+  - 확인: 샘플 기사 3건과 시험 4번 사례에서 도구 호출 순서가 trace에 남는다. 상한을 1로 낮춰도 판정이 나온다. 조회하지 않은 ID를 넣은 가짜 출력을 검증 코드가 "판단 근거 없음"으로 바꾼다.
+  - 결과: `src/nodes/coverage_react.py`(첫 검색 = 기존 `retrieve_checklist` → 에이전트 ↔ `ToolNode` 순환 → 판정 체인 → `coverage.validate`), `src/prompts/coverage_react.md`(조사 보조 프롬프트), `src/llm.py`에 `get_tool_llm`(bind_tools + 재시도·대체 모델·마스킹) 추가. 도구 인자 오류는 `handle_tool_errors=True`로 오류 문구를 돌려줌, 한 차례에 상한을 넘는 다중 호출은 남은 횟수만큼만 실행. trace에 경로·도구 호출 순서·모은 항목·조사 메모를 남김. 실행 결과: 랜섬웨어 샘플 → 원문 확인 2회(2.9.2 확인사항의 '소산' 요구 확인) → 있음(2.9.2, 26초) / 법 개정 샘플 → 원문 확인 1회 → 수정 필요(2.11.3, 15초) / 무관 소식 → 점검 대상 아님(LLM 호출 없음) / 시험 4번 → 원문 조회·재검색 2회로 상한 4회 도달, 11개 항목 모음 → 수정 필요(2.3.1, 수탁사 점검 요구가 없다고 판단. 3.3.2는 조회했지만 인용 안 함, 25초) / 4번을 상한 1로 → 상한 도달 후에도 판정이 나옴(있음, 2.3.1·2.2.2·2.2.3 — 조사가 짧으면 판정이 달라짐, 5-6에서 비교). 가짜 출력: 조회하지 않은 2.10.4 인용 → "판단 근거 없음", 조회한 3.3.2 + 없는 9.9.9 → 3.3.2만 남김.
+- [x] **5-5. 질의 모드 연결** (30분) — `src/agent.py`: 질의 그래프가 `COVERAGE_MODE["query"]`에 따라 ReAct 점검 노드 또는 지금의 검색·점검 노드를 쓴다. API 응답의 `contexts`는 도구로 조회한 항목으로 채운다. 배치의 기사 그래프는 바꾸지 않는다.
+  - 확인: `uvicorn src.api:app`의 웹 페이지와 `POST /query`가 정상 동작하고 trace에 도구 호출이 보인다. 설정을 `fixed`로 바꾸면 이전과 같은 경로로 돈다. 배치 dry-run의 trace에 ReAct 노드가 없다.
+  - 결과: `src/agent.py`에 `add_coverage_nodes(builder, mode)`를 두어 질의 그래프(`config.COVERAGE_MODE["query"]`, react)와 배치 기사 그래프(`["batch"]`, fixed)가 설정으로 점검 노드를 고른다. `run_query(question, coverage_mode=None, use_history=True)`: 평가에서 방식을 바꿔 돌릴 수 있고, 질의 모드도 최근 판정을 DB에서 **읽기 전용**(`read_recent_coverage`, sqlite `mode=ro`)으로 읽어 점검에 참고한다(trace `load_history`). 확인: `POST /query`(랜섬웨어 샘플) 29초, trace에 `coverage_react.research`(경로 '재검색', 원문 조회 1회 + 검색 1회)·`coverage_react.judge`, contexts 7개(첫 검색 + 도구 결과). 웹 페이지 `/`와 `/ui/check` 결과 화면에 ReAct 단계·도구 호출 표시. `coverage_mode="fixed"`로 실행하면 `retrieve_checklist → coverage_check` 이전 경로. 배치 dry-run(기사 8건, 83초): trace에 `coverage_react` 0건, `retrieve_checklist`·`coverage_check`만.
+- [x] **5-6. 4차 평가: ReAct 평가와 3차 비교** (1시간) — `run_eval.py`에 점검 방식 선택 옵션(`--coverage-mode fixed|react`)과 이력 참고 옵션(`--use-history`, 기본 끔: DB 내용에 따라 결과가 바뀌지 않게)을 붙이고, 같은 21건을 **ReAct로 1회** 돌린다. 고정 순서 쪽은 다시 돌리지 않고 3차 최종 결과(`round3_final_result.json`)를 비교 기준으로 쓴다 (사용자 결정: 같은 수치를 다시 재는 비용을 줄임). `evaluation/round4_report.md`에 통과율, RAGAS 4개 지표, 사례당 시간, 평균 도구 호출 수, 경로 분포(바로 판정 / 원문 확인 / 재검색 / 상한 도달)를 남긴다.
+  - 확인: 리포트에 3차 대비 수치와 4번 사례의 변화가 있고, ReAct 쪽 가드레일 사례가 4/4다. ReAct가 3차보다 눈에 띄게 나쁘면 질의 모드 기본값을 사용자와 다시 정한다.
+  - 결과: [round4_report.md](evaluation/round4_report.md). 첫 실행 8/21은 시험지 `expected_tools`의 `coverage_check`가 ReAct 단계 이름(`coverage_react.judge`)과 달라서였고, `run_eval.py`에 단계 별칭(`STEP_ALIASES`)을 두고 `--rescore`가 코드 검사도 다시 하게 고쳐 재채점 → **19/21 (90%)**, 가드레일 4/4, RAGAS 4개 지표 3차와 동일(recall 1.00, precision 0.91, faithfulness 1.00, relevancy 1.00). 3차 최종 20/21 대비 6번 1건 회귀: 3.5.1 원문의 포괄 문구("법령에서 요구하는 내용을 모두 포함")를 근거로 "있음" 판정 → 제안 없음. 4번은 3차와 같은 실패(재검색 2회·3.3.2 원문 조회 후에도 "수정 필요(2.3.1)"). 점검 사례당 21.2 → 28.7초(+36%), LLM 호출 4.4 → 6.6회. 경로: 원문 확인 8, 바로 판정 2, 재검색 2, 상한 도달 2 (평균 도구 호출 1.86회). 사용자 결정: 질의 모드 기본값 react 유지, 6번 개선안 반영 — `coverage_check.md`에 "포괄 문구('법령 요구 내용 포함')만으로는 새 의무를 다룬다고 보지 않음" 규칙 추가(배치에도 적용). 6·13번을 두 방식으로 재실행해 모두 통과(6번 수정 필요 + 제안 복구) → 기대 20/21 (리포트 5절).
+- [x] **5-7. README 반영** (30분) — 활용한 패턴(ReAct, `@tool`, `ToolNode`, 순환 그래프), 아키텍처의 "도구를 쓰지 않는다" 문단, 평가 수치, 회고, 핵심 코드 위치를 고친다.
+  - 확인: README에 ReAct 미사용이라는 설명이 남아 있지 않고(배치는 고정 순서라는 설명으로 바뀜), 추가한 코드 위치 링크가 실제 파일·줄을 가리킨다.
+  - 결과: 활용한 패턴에 Day 3 ReAct(에이전트 ⇄ `ToolNode` 순환, 상한 4회)·Day 4 도구(`@tool` + Pydantic 인자, content_and_artifact, handle_tool_errors) 추가, 장기 메모리에 질의 모드 읽기 전용 참조. 아키텍처: 질의 모드 흐름에 ReAct 점검, "ReAct 쓰지 않음" 문단을 배치(고정 순서)·질의(ReAct) 비교표와 도구·인용 검증 안전장치 설명으로 교체. 실행: `--coverage-mode fixed`, 질의 1건 20~40초. 평가: RAGAS 4차 기준, 통과율에 4차 19/21·6번 개선·비용(+36%)·경로 분포, round4 링크. 회고: 실패한 시도 2건(단계 이름 채점, 원문 포괄 문구), 채택 이유 2개, 한계(ReAct 비용·상한 도달), 향후의 ReAct 항목을 '기사 외 질문 DB 조회 도구'로 교체. 핵심 코드 위치: ReAct 노드·도구·점검 방식 선택·`get_tool_llm`·`read_recent_coverage`·`react_info` 행 추가, 바뀐 줄 번호 갱신. 확인: README에서 'ReAct 쓰지 않/필요 없' 문구 0건, 줄 링크 60개 모두 파일 존재·범위 안이고 가리키는 줄이 해당 함수 정의.
+
+### 제출
+
+- [ ] **5-8. 제출 점검** (45분) — 새 가상환경에서 README 순서대로 설치·실행해 보고, `.env`와 트레이스 파일이 커밋되지 않았는지 확인하고, 시연 화면을 캡처한다.
   - 확인: 깨끗한 환경에서 질의 모드와 배치 dry-run이 README 안내대로 실행되고, `git ls-files`에 `.env`가 없다.
 
 ---
 
 ## 제출 후 (P2) — 지금은 하지 않음
 
-- [ ] 스크래핑 수집기: RSS가 없는 사이트별 수집기 (사이트당 1개 작업. 개인정보위 보도자료는 P1 4-1에 포함)
 - [ ] 국내 문서 수집: KISA, 개인정보보호위원회, 금융보안원, 안랩 자료실의 새 문서와 첨부 다운로드
 - [ ] 문서 텍스트 추출: PDF(`pypdf`), HWPX(XML), HWP(`pyhwp`)
 - [ ] `summarize_document`: 목차·개요와 앞부분 30쪽 요약, 실패 시 제목·링크만 표시
 - [ ] `recheck_proposals`와 `checklist_snapshot`: 체크리스트 변경 감지와 반영완료 처리
-- [ ] (선택) 2·4번 패턴: 질의 모드를 ReAct 에이전트로 확장하고 도구 여러 개 연결
+- [ ] (선택) 질의 모드에서 기사 외 질문(예: "2.9.2 관련 최근 제안")에 답하기 — DB 조회 도구 추가 (점검 단계 ReAct는 M5 5-2~5-7로 옮김)
 
 ## 2차 — 지금은 하지 않음
 
