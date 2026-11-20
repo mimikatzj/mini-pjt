@@ -532,9 +532,9 @@ Response:
 
 - **배치 모드 그래프는 한 번 실행하면 끝난다.** 백그라운드에 계속 떠 있을 필요가 없다.
 - 스케줄러가 매일 배치 진입점(`main.py`)을 실행하고, 진입점이 `graph.invoke()`를 한 번 호출한다.
-- **테스트 단계는 GitHub Actions cron**으로 **매일 오전 7시(KST)** 실행한다 (TASKS 4-10, 원래 P2였으나 사용자 결정으로 P1에 포함). 직접 실행(`python main.py`)도 그대로 쓸 수 있다. 운영 단계의 실행 환경은 전환할 때 사내 정책에 따라 다시 정한다 (사내 서버 cron 우선 검토).
+- **테스트 단계는 GitHub Actions**로 실행한다 (TASKS 4-10, 원래 P2였으나 사용자 결정으로 P1에 포함). 예약 실행(매일 06:17 KST)은 현재 주석 처리로 꺼 두고 수동 실행([Run workflow])만 쓴다. 직접 실행(`python main.py`)도 그대로 쓸 수 있다. 운영 단계의 실행 환경은 전환할 때 사내 정책에 따라 다시 정한다 (사내 서버 cron 우선 검토).
 - GitHub Actions에서는 실행 후 `data/agent.db`와 보기용 md 파일을 저장소에 다시 커밋해서 상태를 유지한다.
-  워크플로: `.github/workflows/daily.yml` (cron `0 22 * * *` UTC, 수동 실행 가능, 실행 환경 시간대 `Asia/Seoul`). 검색 인덱스(`data/chroma/`)는 커밋하지 않으므로 실행마다 다시 만든다. 메일 발송에 실패하면 커밋 단계로 넘어가지 않는다.
+  워크플로: `.github/workflows/daily.yml` (예약 cron `17 21 * * *` UTC는 주석 처리, 수동 실행 가능, 실행 환경 시간대 `Asia/Seoul`). 검색 인덱스(`data/chroma/`)는 커밋하지 않으므로 실행마다 다시 만든다. 메일 발송에 실패하면 커밋 단계로 넘어가지 않는다.
 - **질의 모드**는 FastAPI 서버(`uvicorn`)로 실행한다. 테스트 단계는 로컬에서 필요할 때 띄운다.
 - **메일 계정**: 테스트 단계(P1)는 사용자 개인 Gmail 계정에서 이 에이전트 전용 앱 비밀번호를 발급해 SMTP로 발송한다 (보내는 사람·받는 사람 모두 본인). 2차 회신 처리(IMAP 수신)는 받은편지함을 읽어야 하므로 그 전에 에이전트 전용 계정으로 전환한다.
 - **수신자**: 테스트 단계는 본인 1명이다. 메일 계정 정보, 수신자 주소, AWS 인증 정보는 GitHub Secrets에 둔다.
@@ -622,7 +622,7 @@ RAGAS 4개 지표는 별도 라이브러리 없이 위 방식으로 산출한다
 | LLM | Amazon Bedrock(`ChatBedrockConverse`, us-east-1). 1순위 Claude Haiku 5.5·Sonnet 5.5, 대체 모델은 실습에서 동작 확인된 Claude Haiku 4.5·Sonnet 4.5. 임베딩은 Titan Text Embeddings V2 |
 | 트레이스 | 로컬 파일 트레이서(JSONL) + API 응답의 `trace` |
 | 평가 | `test_queries.csv` 15~20건, LLM-as-Judge 통과율 + RAGAS 4개 지표(별도 라이브러리 없이 산출), 1차·2차 리포트 |
-| 실행 환경 (테스트) | 배치: GitHub Actions cron(매일 오전 7시 KST, P1 M4-10), 직접 실행도 가능 / 질의: 로컬 FastAPI 서버 |
+| 실행 환경 (테스트) | 배치: GitHub Actions 수동 실행(예약 실행은 꺼 둠, P1 M4-10), 직접 실행도 가능 / 질의: 로컬 FastAPI 서버 |
 | 메일 계정·수신자 (테스트) | 사용자 개인 Gmail(이 에이전트 전용 앱 비밀번호), 수신자 본인 1명, 인증 정보는 `.env`(P2부터 GitHub Secrets). 2차 회신 처리 전에 전용 계정으로 전환 |
 | 법령 원문 확인 | 2차로 미룸. 1차는 "원문 미확인" 표시 |
 

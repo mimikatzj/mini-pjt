@@ -1,4 +1,5 @@
-# 보안 데일리 배치: 매일 오전 7시(KST) 실행하고, 누적 기록(DB)과 보기용 md를 저장소에 다시 커밋한다 (SERVICE.md 15장, P2).
+# 보안 데일리 배치: 배치를 실행하고, 누적 기록(DB)과 보기용 md를 저장소에 다시 커밋한다 (SERVICE.md 15장, M4-10).
+# 지금은 예약 실행을 끄고 수동 실행([Run workflow])만 쓴다.
 #
 # 필요한 저장소 Secrets (Settings → Secrets and variables → Actions):
 #   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, GMAIL_ADDRESS, GMAIL_APP_PASSWORD, MAIL_TO
@@ -11,11 +12,11 @@
 name: daily-batch
 
 on:
-  schedule:
-    # 지금은 1회만: 11월 19일 UTC 22:00 = 2026-11-20(금) KST 07:00 (GitHub 사정으로 몇 분~수십 분 늦게 시작할 수 있음)
-    # cron에는 연도가 없어 내년 같은 날 다시 실행될 수 있으니, 실행 확인 후 매일 실행으로 바꾸거나 이 schedule을 지운다.
-    # 매일 실행: cron: "0 22 * * *"
-    - cron: "0 22 19 11 *"
+  # 예약 실행은 당분간 끈다 (2026-11-20). 다시 켤 때는 아래 두 줄의 주석을 푼다.
+  # 정각(:00)은 GitHub 예약 실행이 몰려 늦어지거나 빠질 수 있다 (11-20 07:00 1회 예약이 실행되지 않음).
+  # 그래서 정각을 피해 매일 06:17 KST(전날 UTC 21:17)로 잡아 둔다.
+  # schedule:
+  #   - cron: "17 21 * * *"
   workflow_dispatch:         # Actions 화면의 [Run workflow]로 수동 실행 (누를 때만 실행)
 
 permissions:
